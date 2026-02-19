@@ -45,18 +45,18 @@ export function ProductDetail() {
     [batches, id]
   );
   const totalStock = activeBatches.reduce((s, b) => s + b.quantity, 0);
-  const price = activeBatches.length ? Math.min(...activeBatches.map((b) => b.sellingPrice)) : 0;
+  const price = activeBatches.length ? Math.min(...activeBatches.map((b) => b.salePrice)) : 0;
 
   // Related products (same category)
   const related = useMemo(() => {
     if (!medicine) return [];
     return medicines
-      .filter((m) => m.id !== medicine.id && m.category === medicine.category && m.isActive && m.classification !== 'controlled')
+      .filter((m) => m.id !== medicine.id && m.category === medicine.category && m.isActive && m.webLive && m.classification !== 'controlled')
       .slice(0, 4)
       .map((m) => {
         const ab = batches.filter((b) => b.medicineId === m.id && b.isActive && b.quantity > 0);
         const stock = ab.reduce((s, b) => s + b.quantity, 0);
-        const p = ab.length ? Math.min(...ab.map((b) => b.sellingPrice)) : 0;
+        const p = ab.length ? Math.min(...ab.map((b) => b.salePrice)) : 0;
         return { medicine: m, totalStock: stock, price: p };
       })
       .filter((p) => p.totalStock > 0 && p.price > 0);

@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { useSettingsStore, useDashboardStore, useSalesStore, useInventoryStore, useSupplierStore, useAuthStore } from '@/store';
+import { useSettingsStore, useDashboardStore, useSalesStore, useInventoryStore, useSupplierStore, useAuthStore, useWebStore } from '@/store';
 import { useTranslation } from '@/hooks/useTranslation';
 import { cn, formatCurrency } from '@/lib/utils';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -21,6 +21,7 @@ import {
   Activity,
   Flame,
   BarChart3,
+  Globe,
 } from 'lucide-react';
 import {
   LineChart,
@@ -661,6 +662,101 @@ export function Dashboard() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Web Store Orders — Owner / Superadmin only */}
+      {(role === 'owner' || role === 'superadmin') && settings.webStoreEnabled && <WebOrdersSummary />}
     </div>
+  );
+}
+
+// Inner component to keep Dashboard clean
+function WebOrdersSummary() {
+  const { settings } = useSettingsStore();
+  const orders = useWebStore((s) => s.orders);
+  const navigate = useNavigate();
+  const { t } = useTranslation();
+
+  const totalOrders = orders.length;
+  const totalRevenue = orders.reduce((s, o) => s + o.total, 0);
+  const pendingOrders = orders.filter(o => o.orderStatus === 'pending').length;
+  const recent = [...orders].reverse().slice(0, 5);
+
+  const statusColors: Record<string, string> = {
+    pending: 'bg-amber-100 text-amber-700',
+    confirmed: 'bg-blue-100 text-blue-700',
+    preparing: 'bg-indigo-100 text-indigo-700',
+    shipped: 'bg-purple-100 text-purple-700',
+    delivered: 'bg-emerald-100 text-emerald-700',
+    cancelled: 'bg-red-100 text-red-700',
+  };
+
+  return (
+    <Card className={cn(settings.theme === 'dark' && 'bg-gray-800 border-gray-700')}>
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Globe className="w-5 h-5 text-emerald-500" />
+            <CardTitle className={settings.theme === 'dark' ? 'text-white' : ''}>
+              Web Store Orders
+            </CardTitle>
+          </div>
+          <div className="flex items-center gap-3 text-sm">
+            <span className="text-gray-500">
+              {totalOrders} orders • Rs. {totalRevenue.toLocaleString()}
+            </span>
+            {pendingOrders > 0 && (
+              <Badge variant="destructive" className="text-xs">
+                {pendingOrders} pending
+              </Badge>
+            )}
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {recent.length === 0 ? (
+          <p className="text-center text-gray-500 py-6">No web orders yet</p>
+        ) : (
+          <div className="space-y-3">
+            {recent.map(order => (
+              <div
+                key={order.id}
+                className={cn(
+                  'flex items-center justify-between p-3 rounded-lg border',
+                  settings.theme === 'dark' ? 'border-gray-700' : 'border-gray-100'
+                )}
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-9 h-9 rounded-lg bg-emerald-100 flex items-center justify-center shrink-0">
+                    <Package className="w-4 h-4 text-emerald-600" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className={cn('font-medium text-sm truncate', settings.theme === 'dark' ? 'text-white' : 'text-gray-900')}>
+                      {order.customerName}
+                    </p>
+                    <p className="text-xs text-gray-500">{order.id} • {order.items.length} items</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 shrink-0">
+                  <span className={cn('px-2 py-0.5 rounded-full text-xs font-medium capitalize', statusColors[order.orderStatus])}>
+                    {order.orderStatus}
+                  </span>
+                  <span className={cn('font-semibold text-sm', settings.theme === 'dark' ? 'text-emerald-400' : 'text-emerald-600')}>
+                    Rs. {order.total.toLocaleString()}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        <Button
+          variant="ghost"
+          className="w-full mt-4 gap-2"
+          onClick={() => navigate('/super-admin')}
+        >
+          View All Web Orders
+          <ArrowRight className="w-4 h-4" />
+        </Button>
+      </CardContent>
+    </Card>
   );
 }

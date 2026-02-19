@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, Outlet, useNavigate } from 'react-router-dom';
-import { useWebStore, useSettingsStore } from '@/store';
+import { useWebStore, useSettingsStore, useWebAuthStore } from '@/store';
 import {
   ShoppingCart,
   Search,
@@ -13,6 +13,9 @@ import {
   Truck,
   ShieldCheck,
   Clock,
+  User,
+  LogOut,
+  ChevronDown,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -21,8 +24,10 @@ export function StoreLayout() {
   const { settings } = useSettingsStore();
   const getCartItemCount = useWebStore((s) => s.getCartItemCount);
   const cartCount = getCartItemCount();
+  const { customer, isLoggedIn, logout } = useWebAuthStore();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -114,10 +119,56 @@ export function StoreLayout() {
 
               <Link
                 to="/login"
-                className="hidden lg:inline-flex px-4 py-2 text-sm font-medium text-emerald-700 border border-emerald-200 rounded-full hover:bg-emerald-50 transition-colors"
+                className="hidden lg:inline-flex px-4 py-2 text-sm font-medium text-gray-500 hover:text-emerald-600 transition-colors"
               >
-                Admin Login
+                Admin
               </Link>
+
+              {isLoggedIn && customer ? (
+                <div className="relative hidden lg:block">
+                  <button
+                    onClick={() => setAccountMenuOpen(!accountMenuOpen)}
+                    className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-700 border border-gray-200 rounded-full hover:bg-gray-50 transition-colors"
+                  >
+                    <div className="w-6 h-6 rounded-full bg-emerald-100 flex items-center justify-center">
+                      <User className="w-3.5 h-3.5 text-emerald-600" />
+                    </div>
+                    <span className="max-w-[100px] truncate">{customer.name.split(' ')[0]}</span>
+                    <ChevronDown className="w-3.5 h-3.5 text-gray-400" />
+                  </button>
+                  {accountMenuOpen && (
+                    <>
+                      <div className="fixed inset-0 z-40" onClick={() => setAccountMenuOpen(false)} />
+                      <div className="absolute right-0 mt-2 w-48 bg-white rounded-xl border border-gray-100 shadow-lg z-50 py-1">
+                        <div className="px-4 py-2 border-b border-gray-100">
+                          <p className="font-medium text-sm text-gray-900 truncate">{customer.name}</p>
+                          <p className="text-xs text-gray-500 truncate">{customer.email}</p>
+                        </div>
+                        <Link
+                          to="/store/track"
+                          onClick={() => setAccountMenuOpen(false)}
+                          className="flex items-center gap-2 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50"
+                        >
+                          <Truck className="w-4 h-4" /> My Orders
+                        </Link>
+                        <button
+                          onClick={() => { logout(); setAccountMenuOpen(false); }}
+                          className="flex items-center gap-2 w-full px-4 py-2.5 text-sm text-red-600 hover:bg-red-50"
+                        >
+                          <LogOut className="w-4 h-4" /> Sign Out
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              ) : (
+                <Link
+                  to="/store/login"
+                  className="hidden lg:inline-flex px-4 py-2 text-sm font-medium text-emerald-700 border border-emerald-200 rounded-full hover:bg-emerald-50 transition-colors"
+                >
+                  Sign In
+                </Link>
+              )}
 
               {/* Mobile Menu Button */}
               <button
@@ -149,7 +200,22 @@ export function StoreLayout() {
           <div className="lg:hidden border-t bg-white px-4 py-3 space-y-1">
             <Link to="/store" onClick={() => setMobileMenuOpen(false)} className="block px-3 py-2 text-sm font-medium text-gray-700 rounded-lg hover:bg-gray-50">Shop</Link>
             <Link to="/store/track" onClick={() => setMobileMenuOpen(false)} className="block px-3 py-2 text-sm font-medium text-gray-700 rounded-lg hover:bg-gray-50">Track Order</Link>
-            <Link to="/login" onClick={() => setMobileMenuOpen(false)} className="block px-3 py-2 text-sm font-medium text-emerald-600 rounded-lg hover:bg-emerald-50">Admin Login</Link>
+            {isLoggedIn && customer ? (
+              <>
+                <div className="px-3 py-2 text-sm text-gray-500 border-t mt-1 pt-2">
+                  Signed in as <span className="font-medium text-gray-700">{customer.name}</span>
+                </div>
+                <button
+                  onClick={() => { logout(); setMobileMenuOpen(false); }}
+                  className="block w-full text-left px-3 py-2 text-sm font-medium text-red-600 rounded-lg hover:bg-red-50"
+                >
+                  Sign Out
+                </button>
+              </>
+            ) : (
+              <Link to="/store/login" onClick={() => setMobileMenuOpen(false)} className="block px-3 py-2 text-sm font-medium text-emerald-600 rounded-lg hover:bg-emerald-50">Sign In / Sign Up</Link>
+            )}
+            <Link to="/login" onClick={() => setMobileMenuOpen(false)} className="block px-3 py-2 text-xs text-gray-400 rounded-lg hover:bg-gray-50">Admin Login</Link>
           </div>
         )}
       </header>

@@ -26,6 +26,7 @@ import type {
   PharmacyKPIs,
   WebOrder,
   WebCartItem,
+  WebCustomer,
 } from '@/types';
 
 // Auth Store
@@ -972,5 +973,75 @@ export const useWebStore = create<WebStoreState>()(
       getCartItemCount: () => get().cart.reduce((s, c) => s + c.quantity, 0),
     }),
     { name: 'web-store-storage' }
+  )
+);
+
+// ─── Web Customer Auth Store ───────────────────────────────────────────────
+interface WebAuthState {
+  customer: WebCustomer | null;
+  isLoggedIn: boolean;
+  customers: WebCustomer[]; // registered customers DB
+  login: (email: string, password: string) => boolean;
+  signup: (name: string, email: string, password: string, phone?: string) => boolean;
+  googleLogin: (name: string, email: string) => void;
+  logout: () => void;
+  updateProfile: (data: Partial<WebCustomer>) => void;
+}
+
+export const useWebAuthStore = create<WebAuthState>()(
+  persist(
+    (set, get) => ({
+      customer: null,
+      isLoggedIn: false,
+      customers: [],
+      login: (email: string, _password: string) => {
+        const found = get().customers.find((c) => c.email === email);
+        if (found) {
+          set({ customer: found, isLoggedIn: true });
+          return true;
+        }
+        return false;
+      },
+      signup: (name: string, email: string, _password: string, phone?: string) => {
+        const { customers } = get();
+        if (customers.find((c) => c.email === email)) return false;
+        const newCustomer: WebCustomer = {
+          id: `cust-${Date.now().toString(36)}`,
+          name,
+          email,
+          phone,
+          authProvider: 'email',
+          createdAt: new Date().toISOString(),
+        };
+        set({ customers: [...customers, newCustomer], customer: newCustomer, isLoggedIn: true });
+        return true;
+      },
+      googleLogin: (name: string, email: string) => {
+        const { customers } = get();
+        let existing = customers.find((c) => c.email === email);
+        if (!existing) {
+          existing = {
+            id: `cust-${Date.now().toString(36)}`,
+            name,
+            email,
+            authProvider: 'google',
+            createdAt: new Date().toISOString(),
+          };
+          set({ customers: [...customers, existing] });
+        }
+        set({ customer: existing, isLoggedIn: true });
+      },
+      logout: () => set({ customer: null, isLoggedIn: false }),
+      updateProfile: (data) =>
+        set((state) => {
+          if (!state.customer) return state;
+          const updated = { ...state.customer, ...data };
+          return {
+            customer: updated,
+            customers: state.customers.map((c) => (c.id === updated.id ? updated : c)),
+          };
+        }),
+    }),
+    { name: 'web-auth-storage' }
   )
 );

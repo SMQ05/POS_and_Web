@@ -68,14 +68,14 @@ export function StoreFront() {
   // Compute available products (non-controlled, active, in stock)
   const products = useMemo(() => {
     return medicines
-      .filter((m) => m.isActive && m.classification !== 'controlled')
+      .filter((m) => m.isActive && m.webLive && m.classification !== 'controlled')
       .map((m) => {
         const activeBatches = batches.filter(
           (b) => b.medicineId === m.id && b.isActive && b.quantity > 0
         );
         const totalStock = activeBatches.reduce((s, b) => s + b.quantity, 0);
         const minPrice = activeBatches.length
-          ? Math.min(...activeBatches.map((b) => b.sellingPrice))
+          ? Math.min(...activeBatches.map((b) => b.salePrice))
           : 0;
         return { medicine: m, totalStock, price: minPrice };
       })

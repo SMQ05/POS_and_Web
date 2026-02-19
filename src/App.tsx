@@ -18,6 +18,7 @@ import { Settings } from '@/pages/Settings';
 import { Expenses } from '@/pages/Expenses';
 import { PurchaseOrders } from '@/pages/PurchaseOrders';
 import { SuperAdmin } from '@/pages/SuperAdmin';
+import { SuperAdminLogin } from '@/pages/SuperAdminLogin';
 import { StoreLayout } from '@/pages/store/StoreLayout';
 import { StoreFront } from '@/pages/store/StoreFront';
 import { ProductDetail } from '@/pages/store/ProductDetail';
@@ -25,6 +26,7 @@ import { Cart } from '@/pages/store/Cart';
 import { Checkout } from '@/pages/store/Checkout';
 import { OrderConfirmation } from '@/pages/store/OrderConfirmation';
 import { TrackOrder } from '@/pages/store/TrackOrder';
+import { StoreAuth } from '@/pages/store/StoreAuth';
 import { Toaster } from '@/components/ui/sonner';
 
 // Protected Route Component
@@ -101,6 +103,19 @@ function App() {
       <DataInitializer />
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/super-admin/login" element={<SuperAdminLogin />} />
+
+        {/* Super Admin dashboard (separate from regular admin layout) */}
+        <Route
+          path="/super-admin"
+          element={
+            <ProtectedRoute>
+              <Layout>
+                <SuperAdmin />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
 
         {/* Customer-facing Web Store (public, no auth required) */}
         {settings.webStoreEnabled && (
@@ -111,6 +126,7 @@ function App() {
             <Route path="checkout" element={<Checkout />} />
             <Route path="order-confirmation/:orderId" element={<OrderConfirmation />} />
             <Route path="track" element={<TrackOrder />} />
+            <Route path="login" element={<StoreAuth />} />
           </Route>
         )}
 
@@ -122,7 +138,6 @@ function App() {
               <Layout>
                 <Routes>
                   <Route path="/" element={<Dashboard />} />
-                  <Route path="/super-admin" element={<SuperAdmin />} />
                   {settings.posEnabled && <Route path="/pos" element={<POS />} />}
                   <Route path="/sales" element={<Sales />} />
                   <Route path="/inventory" element={<Inventory />} />

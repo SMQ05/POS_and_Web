@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { useWebStore, useSettingsStore } from '@/store';
+import { useWebStore, useSettingsStore, useWebAuthStore } from '@/store';
 import type { WebOrder } from '@/types';
 import {
   CreditCard,
@@ -10,6 +10,7 @@ import {
   ShieldCheck,
   Lock,
   Package,
+  User,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -20,15 +21,16 @@ export function Checkout() {
   const getCartTotal = useWebStore((s) => s.getCartTotal);
   const placeOrder = useWebStore((s) => s.placeOrder);
   const { settings } = useSettingsStore();
+  const { customer, isLoggedIn } = useWebAuthStore();
 
   const { subtotal, deliveryFee, total } = getCartTotal();
 
   const [form, setForm] = useState({
-    name: '',
-    phone: '',
-    email: '',
-    address: '',
-    city: 'Lahore',
+    name: customer?.name || '',
+    phone: customer?.phone || '',
+    email: customer?.email || '',
+    address: customer?.address || '',
+    city: customer?.city || 'Lahore',
     notes: '',
   });
   const [paymentMethod, setPaymentMethod] = useState<'cod' | 'jazzcash' | 'easypaisa' | 'card'>('cod');
@@ -115,6 +117,27 @@ export function Checkout() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Left: Form */}
           <div className="lg:col-span-2 space-y-8">
+            {/* Login suggestion for guest users */}
+            {!isLoggedIn && (
+              <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 flex items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-emerald-100 flex items-center justify-center">
+                    <User className="w-5 h-5 text-emerald-600" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-emerald-800">Have an account?</p>
+                    <p className="text-xs text-emerald-600">Sign in for faster checkout and order tracking</p>
+                  </div>
+                </div>
+                <Link
+                  to="/store/login?redirect=/store/checkout"
+                  className="px-4 py-2 text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors shrink-0"
+                >
+                  Sign In
+                </Link>
+              </div>
+            )}
+
             {/* Delivery Info */}
             <div className="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm">
               <h2 className="text-lg font-bold text-gray-900 mb-5">Delivery Information</h2>

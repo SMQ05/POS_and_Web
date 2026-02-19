@@ -30,7 +30,13 @@ export function Login() {
     try {
       const success = await login(email, password);
       if (success) {
-        navigate('/');
+        const user = useAuthStore.getState().currentUser;
+        if (user?.role === 'superadmin') {
+          // Superadmin should use the dedicated super admin login
+          navigate('/super-admin');
+        } else {
+          navigate('/');
+        }
       } else {
         setError(t('login.invalidCredentials'));
       }
@@ -43,7 +49,6 @@ export function Login() {
 
   const quickLogin = (role: string) => {
     const emails: Record<string, string> = {
-      superadmin: 'superadmin@pharmapos.pk',
       owner: 'owner@pharmapos.pk',
       manager: 'manager@pharmapos.pk',
       cashier: 'cashier@pharmapos.pk',
@@ -199,15 +204,6 @@ export function Login() {
               </div>
             </div>
             <div className="flex gap-2 w-full flex-wrap">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => quickLogin('superadmin')}
-                className="flex-1 border-gray-900 text-gray-900"
-              >
-                Super Admin
-              </Button>
               <Button
                 type="button"
                 variant="outline"

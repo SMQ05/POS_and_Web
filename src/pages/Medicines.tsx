@@ -51,6 +51,7 @@ import {
   Save,
   X,
   AlertCircle,
+  Globe,
 } from 'lucide-react';
 import { useTranslation } from '@/hooks/useTranslation';
 import type { Medicine, MedicineCategory, DosageForm } from '@/types';
@@ -144,6 +145,7 @@ export function Medicines() {
             classification: (row['Classification'] || 'otc') as 'otc' | 'prescription' | 'controlled',
             isPrescriptionRequired: (row['Classification'] || '').toLowerCase() === 'prescription',
             isActive: true,
+            webLive: true,
             reorderLevel: parseInt(row['Reorder Level'] || '50', 10),
             reorderQuantity: parseInt(row['Reorder Quantity'] || '100', 10),
             createdAt: new Date(),
@@ -168,6 +170,7 @@ export function Medicines() {
     unit: 'tablet',
     barcode: '',
     isPrescriptionRequired: false,
+    webLive: true,
     reorderLevel: 50,
     reorderQuantity: 100,
     description: '',
@@ -212,6 +215,7 @@ export function Medicines() {
       barcode: formData.barcode,
       isPrescriptionRequired: formData.isPrescriptionRequired || false,
       isActive: true,
+      webLive: formData.webLive ?? true,
       reorderLevel: formData.reorderLevel || 50,
       reorderQuantity: formData.reorderQuantity || 100,
       description: formData.description,
@@ -254,6 +258,7 @@ export function Medicines() {
       unit: 'tablet',
       barcode: '',
       isPrescriptionRequired: false,
+      webLive: true,
       reorderLevel: 50,
       reorderQuantity: 100,
       description: '',
@@ -498,6 +503,7 @@ export function Medicines() {
                   <TableHead>{t('medicines.strength')}</TableHead>
                   <TableHead>{t('common.type')}</TableHead>
                   <TableHead>{t('medicines.barcode')}</TableHead>
+                  <TableHead className="text-center">Web</TableHead>
                   <TableHead className="text-right">{t('common.actions')}</TableHead>
                 </TableRow>
               </TableHeader>
@@ -533,6 +539,21 @@ export function Medicines() {
                       ) : (
                         <span className="text-gray-400">-</span>
                       )}
+                    </TableCell>
+                    <TableCell className="text-center">
+                      <button
+                        onClick={() => updateMedicine(medicine.id, { webLive: !medicine.webLive })}
+                        title={medicine.webLive ? 'Live on Web Store' : 'Not on Web Store'}
+                        className={cn(
+                          'inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium transition-colors',
+                          medicine.webLive
+                            ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
+                            : 'bg-gray-100 text-gray-400 hover:bg-gray-200'
+                        )}
+                      >
+                        <Globe className="w-3 h-3" />
+                        {medicine.webLive ? 'Live' : 'Off'}
+                      </button>
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">

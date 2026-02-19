@@ -66,6 +66,8 @@ export interface Medicine {
   /** Controlled drug schedule (e.g. Schedule-III) */
   controlledSchedule?: string;
   isActive: boolean;
+  /** Whether this medicine is listed on the customer-facing web store */
+  webLive: boolean;
   reorderLevel: number;
   reorderQuantity: number;
   createdAt: Date;
@@ -598,4 +600,16 @@ export interface WebCartItem {
   price: number;
   quantity: number;
   maxQuantity: number;
+}
+
+// ─── Web Customer Auth ────────────────────────────────────────────────────
+export interface WebCustomer {
+  id: string;
+  name: string;
+  email: string;
+  phone?: string;
+  address?: string;
+  city?: string;
+  authProvider: 'email' | 'google';
+  createdAt: string;
 }
