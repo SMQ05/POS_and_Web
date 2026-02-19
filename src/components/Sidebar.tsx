@@ -80,8 +80,8 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
     return true;
   });
 
-  // Add super admin item at top if superadmin or owner
-  const superAdminItem = (isSuperAdmin || currentUser?.role === 'owner') ? [{
+  // Add super admin item at top if superadmin only
+  const superAdminItem = isSuperAdmin ? [{
     icon: Shield,
     labelKey: 'nav.superAdmin',
     path: '/super-admin',
