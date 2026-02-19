@@ -124,7 +124,7 @@ export function Header() {
               </div>
             ) : (
               <>
-                {expiryAlerts.filter(a => !a.isResolved).map(alert => (
+                {getLiveExpiryAlerts().filter(a => !dismissedExpiryAlertIds.includes(a.id)).slice(0, 5).map(alert => (
                   <DropdownMenuItem key={alert.id} className="flex items-start gap-2 p-3">
                     <AlertTriangle className="w-4 h-4 text-amber-500 mt-0.5" />
                     <div className="flex-1">
@@ -135,7 +135,7 @@ export function Header() {
                     </div>
                   </DropdownMenuItem>
                 ))}
-                {lowStockAlerts.filter(a => !a.isResolved).map(alert => (
+                {getLiveLowStockAlerts().filter(a => !dismissedLowStockAlertIds.includes(a.id)).slice(0, 5).map(alert => (
                   <DropdownMenuItem key={alert.id} className="flex items-start gap-2 p-3">
                     <AlertTriangle className="w-4 h-4 text-red-500 mt-0.5" />
                     <div className="flex-1">
