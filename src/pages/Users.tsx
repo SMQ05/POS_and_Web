@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useSettingsStore } from '@/store';
+import { useSettingsStore, useAuthStore } from '@/store';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -44,12 +44,14 @@ import {
   Check,
   X,
 } from 'lucide-react';
+import { useTranslation } from '@/hooks/useTranslation';
 import type { User, UserRole } from '@/types';
 
 const roles: { value: UserRole; label: string; description: string }[] = [
   { value: 'owner', label: 'Owner', description: 'Full system access' },
   { value: 'manager', label: 'Manager', description: 'Manage operations and staff' },
   { value: 'cashier', label: 'Cashier', description: 'POS and sales only' },
+  { value: 'salesman', label: 'Salesman', description: 'POS selling only' },
   { value: 'pharmacist', label: 'Pharmacist', description: 'Medicines and prescriptions' },
   { value: 'accountant', label: 'Accountant', description: 'Financial reports only' },
 ];
@@ -118,11 +120,30 @@ const mockUsers: User[] = [
     createdAt: new Date('2024-02-15'),
     lastLogin: new Date(),
   },
+  {
+    id: '5',
+    name: 'Bilal Ahmed',
+    email: 'salesman@pharmapos.pk',
+    role: 'salesman',
+    permissions: [
+      { module: 'pos', actions: ['create', 'read'] },
+    ],
+    isActive: true,
+    createdAt: new Date('2024-03-01'),
+    lastLogin: new Date(),
+  },
 ];
 
 export function Users() {
   const { settings } = useSettingsStore();
+  const { currentUser } = useAuthStore();
   const [users, setUsers] = useState<User[]>(mockUsers);
+  const { t, isRTL } = useTranslation();
+
+  // Manager can only create/manage cashier and salesman accounts
+  const availableRoles = currentUser?.role === 'manager'
+    ? roles.filter(r => r.value === 'cashier' || r.value === 'salesman')
+    : roles;
   const [searchQuery, setSearchQuery] = useState('');
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [showEditDialog, setShowEditDialog] = useState(false);
@@ -233,23 +254,23 @@ export function Users() {
     );
   };
 
-  // User Form Component
-  const UserForm = () => (
+  // User Form Content (plain JSX, not a component — avoids remount/focus-loss)
+  const userFormContent = (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
-          <Label>Full Name *</Label>
+          <Label>{t('users.fullName')}</Label>
           <Input
-            placeholder="e.g., John Doe"
+            placeholder={t('users.namePlaceholder')}
             value={formData.name}
             onChange={(e) => setFormData({ ...formData, name: e.target.value })}
           />
         </div>
         <div className="space-y-2">
-          <Label>Email *</Label>
+          <Label>{t('users.emailLabel')}</Label>
           <Input
             type="email"
-            placeholder="e.g., user@pharmapos.pk"
+            placeholder={t('users.emailPlaceholder')}
             value={formData.email}
             onChange={(e) => setFormData({ ...formData, email: e.target.value })}
           />
@@ -257,7 +278,7 @@ export function Users() {
       </div>
 
       <div className="space-y-2">
-        <Label>Role *</Label>
+        <Label>{t('users.role')} *</Label>
         <Select
           value={formData.role}
           onValueChange={(value) => setFormData({ ...formData, role: value as UserRole })}
@@ -266,11 +287,11 @@ export function Users() {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {roles.map(role => (
+            {availableRoles.map(role => (
               <SelectItem key={role.value} value={role.value}>
                 <div>
-                  <p>{role.label}</p>
-                  <p className="text-xs text-gray-500">{role.description}</p>
+                  <p>{t(`roles.${role.value}`)}</p>
+                  <p className="text-xs text-gray-500">{t(`users.roleDescriptions.${role.value}`)}</p>
                 </div>
               </SelectItem>
             ))}
@@ -279,11 +300,11 @@ export function Users() {
       </div>
 
       <div className="space-y-2">
-        <Label>Permissions</Label>
+        <Label>{t('users.permissions')}</Label>
         <div className="border rounded-lg p-4 space-y-3">
           {permissions.map((perm) => (
             <div key={perm.module} className="flex items-center justify-between">
-              <span className="font-medium">{perm.label}</span>
+              <span className="font-medium">{t(`users.permissionModules.${perm.module}`)}</span>
               <div className="flex gap-4">
                 {['create', 'read', 'update', 'delete'].map((action) => (
                   <div key={action} className="flex items-center gap-1">
@@ -293,7 +314,7 @@ export function Users() {
                       onCheckedChange={() => togglePermission(perm.module, action)}
                     />
                     <Label htmlFor={`${perm.module}-${action}`} className="text-xs capitalize">
-                      {action}
+                      {t(`users.permissionActions.${action}`)}
                     </Label>
                   </div>
                 ))}
@@ -311,7 +332,7 @@ export function Users() {
             setFormData({ ...formData, isActive: checked as boolean })
           }
         />
-        <Label htmlFor="active">Active User</Label>
+        <Label htmlFor="active">{t('users.activeUser')}</Label>
       </div>
     </div>
   );
@@ -325,13 +346,13 @@ export function Users() {
             'text-2xl font-bold',
             settings.theme === 'dark' ? 'text-white' : 'text-gray-900'
           )}>
-            User Management
+            {t('users.title')}
           </h1>
           <p className={cn(
             'text-sm',
             settings.theme === 'dark' ? 'text-gray-400' : 'text-gray-600'
           )}>
-            Manage users and their permissions
+            {t('users.subtitle')}
           </p>
         </div>
         <div className="flex gap-2">
@@ -340,7 +361,7 @@ export function Users() {
             onClick={() => setShowAddDialog(true)}
           >
             <Plus className="w-4 h-4" />
-            Add User
+            {t('users.addUser')}
           </Button>
         </div>
       </div>
@@ -351,7 +372,7 @@ export function Users() {
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-gray-500">Total Users</p>
+                <p className="text-sm text-gray-500">{t('users.totalUsers')}</p>
                 <p className="text-2xl font-bold">{users.length}</p>
               </div>
               <div className="w-10 h-10 rounded-lg bg-blue-100 flex items-center justify-center">
@@ -364,7 +385,7 @@ export function Users() {
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-gray-500">Active Users</p>
+                <p className="text-sm text-gray-500">{t('users.activeUsers')}</p>
                 <p className="text-2xl font-bold text-emerald-500">
                   {users.filter(u => u.isActive).length}
                 </p>
@@ -379,7 +400,7 @@ export function Users() {
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-gray-500">Inactive Users</p>
+                <p className="text-sm text-gray-500">{t('users.inactiveUsers')}</p>
                 <p className="text-2xl font-bold text-red-500">
                   {users.filter(u => !u.isActive).length}
                 </p>
@@ -394,7 +415,7 @@ export function Users() {
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-gray-500">Online Now</p>
+                <p className="text-sm text-gray-500">{t('users.onlineNow')}</p>
                 <p className="text-2xl font-bold text-amber-500">3</p>
               </div>
               <div className="w-10 h-10 rounded-lg bg-amber-100 flex items-center justify-center">
@@ -411,7 +432,7 @@ export function Users() {
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <Input
-              placeholder="Search users..."
+              placeholder={t('users.searchPlaceholder')}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="pl-10"
@@ -426,7 +447,7 @@ export function Users() {
       )}>
         <CardHeader>
           <CardTitle className={settings.theme === 'dark' ? 'text-white' : ''}>
-            User List ({filteredUsers.length})
+            {t('users.userList')} ({filteredUsers.length})
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
@@ -434,11 +455,11 @@ export function Users() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>User</TableHead>
-                  <TableHead>Role</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Last Login</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
+                  <TableHead>{t('users.user')}</TableHead>
+                  <TableHead>{t('users.role')}</TableHead>
+                  <TableHead>{t('common.status')}</TableHead>
+                  <TableHead>{t('users.lastLogin')}</TableHead>
+                  <TableHead className="text-right">{t('common.actions')}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -465,21 +486,23 @@ export function Users() {
                     <TableCell>
                       <Badge variant="outline" className="capitalize">
                         <Shield className="w-3 h-3 mr-1" />
-                        {user.role}
+                        {t(`roles.${user.role}`)}
                       </Badge>
                     </TableCell>
                     <TableCell>
                       <Badge variant={user.isActive ? 'success' : 'secondary'}>
-                        {user.isActive ? 'Active' : 'Inactive'}
+                        {user.isActive ? t('common.active') : t('common.inactive')}
                       </Badge>
                     </TableCell>
                     <TableCell>
                       {user.lastLogin 
                         ? new Date(user.lastLogin).toLocaleDateString() 
-                        : 'Never'}
+                        : t('users.never')}
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
+                        {(currentUser?.role === 'owner' || user.role === 'cashier' || user.role === 'salesman') && (
+                        <>
                         <Button
                           variant="ghost"
                           size="icon"
@@ -495,6 +518,8 @@ export function Users() {
                         >
                           <Trash2 className="w-4 h-4" />
                         </Button>
+                        </>
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>
@@ -509,17 +534,17 @@ export function Users() {
       <Dialog open={showAddDialog} onOpenChange={setShowAddDialog}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Add New User</DialogTitle>
+            <DialogTitle>{t('users.addNew')}</DialogTitle>
             <DialogDescription>
-              Create a new user account
+              {t('users.addNewDesc')}
             </DialogDescription>
           </DialogHeader>
           
-          <UserForm />
+          {userFormContent}
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowAddDialog(false)}>
-              Cancel
+              {t('common.cancel')}
             </Button>
             <Button 
               className="bg-emerald-500 hover:bg-emerald-600"
@@ -527,7 +552,7 @@ export function Users() {
               disabled={!formData.name || !formData.email}
             >
               <Save className="w-4 h-4 mr-2" />
-              Create User
+              {t('users.createUser')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -537,24 +562,24 @@ export function Users() {
       <Dialog open={showEditDialog} onOpenChange={setShowEditDialog}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Edit User</DialogTitle>
+            <DialogTitle>{t('users.editTitle')}</DialogTitle>
             <DialogDescription>
-              Update user details and permissions
+              {t('users.editDesc')}
             </DialogDescription>
           </DialogHeader>
           
-          <UserForm />
+          {userFormContent}
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowEditDialog(false)}>
-              Cancel
+              {t('common.cancel')}
             </Button>
             <Button 
               className="bg-emerald-500 hover:bg-emerald-600"
               onClick={handleEdit}
             >
               <Save className="w-4 h-4 mr-2" />
-              Update User
+              {t('users.updateUser')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -566,21 +591,20 @@ export function Users() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-red-600">
               <AlertCircle className="w-5 h-5" />
-              Delete User
+              {t('users.deleteTitle')}
             </DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete <strong>{selectedUser?.name}</strong>?
-              This action cannot be undone.
+              {t('users.deleteConfirm', selectedUser?.name || '')}
             </DialogDescription>
           </DialogHeader>
           
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowDeleteDialog(false)}>
-              Cancel
+              {t('common.cancel')}
             </Button>
             <Button variant="destructive" onClick={handleDelete}>
               <Trash2 className="w-4 h-4 mr-2" />
-              Delete
+              {t('users.deleteTitle')}
             </Button>
           </DialogFooter>
         </DialogContent>

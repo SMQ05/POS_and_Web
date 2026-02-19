@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { useSettingsStore, useDashboardStore, useInventoryStore } from '@/store';
+import { useNavigate } from 'react-router-dom';
+import { useSettingsStore, useDashboardStore, useInventoryStore, useSupplierStore } from '@/store';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -28,26 +29,52 @@ import {
   Calendar,
   Package,
   Check,
-  Trash2,
   TrendingDown,
-  Clock,
   AlertCircle,
   Bell,
+  Flame,
+  ShieldAlert,
   ShoppingCart,
 } from 'lucide-react';
+import { useTranslation } from '@/hooks/useTranslation';
 
 export function Alerts() {
   const { settings } = useSettingsStore();
-  const { expiryAlerts, lowStockAlerts, resolveExpiryAlert, resolveLowStockAlert } = useDashboardStore();
-  const { medicines, getMedicineStock } = useInventoryStore();
+  const { dismissedExpiryAlertIds, dismissedLowStockAlertIds, resolveExpiryAlert, resolveLowStockAlert } = useDashboardStore();
+  const { getExpiryRiskReport, getLiveExpiryAlerts, getLiveLowStockAlerts } = useInventoryStore();
+  const { purchases } = useSupplierStore();
+  const navigate = useNavigate();
   
   const [showResolveDialog, setShowResolveDialog] = useState(false);
   const [selectedAlert, setSelectedAlert] = useState<any>(null);
   const [alertType, setAlertType] = useState<'expiry' | 'stock'>('expiry');
 
-  // Get pending alerts
-  const pendingExpiryAlerts = expiryAlerts.filter(a => !a.isResolved);
-  const pendingLowStockAlerts = lowStockAlerts.filter(a => !a.isResolved);
+  const expiryRiskReport = getExpiryRiskReport();
+  const { t, isRTL } = useTranslation();
+
+  // Live computed alerts from actual inventory data
+  const liveExpiryAlerts = getLiveExpiryAlerts();
+  const liveLowStockAlerts = getLiveLowStockAlerts();
+
+  /** Check if a medicine already has a pending PO */
+  const getMedicinePendingQty = (medicineId: string) =>
+    purchases
+      .filter(p => p.status === 'ordered' || p.status === 'draft')
+      .flatMap(p => p.items)
+      .filter(i => i.medicineId === medicineId)
+      .reduce((s, i) => s + i.quantity, 0);
+
+  // Filter based on settings
+  const expiryAlertsEnabled = settings.enableExpiryAlerts ?? true;
+  const lowStockAlertsEnabled = settings.enableLowStockAlerts ?? true;
+
+  // Get pending alerts (live data, filter out dismissed ones)
+  const pendingExpiryAlerts = expiryAlertsEnabled
+    ? liveExpiryAlerts.filter(a => !dismissedExpiryAlertIds.includes(a.id))
+    : [];
+  const pendingLowStockAlerts = lowStockAlertsEnabled
+    ? liveLowStockAlerts.filter(a => !dismissedLowStockAlertIds.includes(a.id))
+    : [];
 
   // Handle resolve
   const handleResolve = () => {
@@ -86,13 +113,13 @@ export function Alerts() {
             'text-2xl font-bold',
             settings.theme === 'dark' ? 'text-white' : 'text-gray-900'
           )}>
-            Alerts & Notifications
+            {t('alerts.title')}
           </h1>
           <p className={cn(
             'text-sm',
             settings.theme === 'dark' ? 'text-gray-400' : 'text-gray-600'
           )}>
-            Manage expiry and stock alerts
+            {t('alerts.subtitle')}
           </p>
         </div>
       </div>
@@ -103,7 +130,7 @@ export function Alerts() {
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-gray-500">Total Alerts</p>
+                <p className="text-sm text-gray-500">{t('alerts.totalAlerts')}</p>
                 <p className="text-2xl font-bold">
                   {pendingExpiryAlerts.length + pendingLowStockAlerts.length}
                 </p>
@@ -118,7 +145,7 @@ export function Alerts() {
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-gray-500">Expiry Alerts</p>
+                <p className="text-sm text-gray-500">{t('alerts.expiryAlerts')}</p>
                 <p className="text-2xl font-bold text-amber-500">
                   {pendingExpiryAlerts.length}
                 </p>
@@ -133,7 +160,25 @@ export function Alerts() {
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-gray-500">Low Stock</p>
+                <p className="text-sm text-gray-500">{t('alerts.criticalRiskBatches')}</p>
+                <p className="text-2xl font-bold text-red-600">
+                  {expiryRiskReport.filter(r => r.riskPercent >= 80).length}
+                </p>
+                <p className="text-xs text-gray-400">
+                  Rs. {expiryRiskReport.reduce((s, r) => s + r.potentialLoss, 0).toLocaleString('en-PK', { maximumFractionDigits: 0 })} {t('alerts.potentialLoss')}
+                </p>
+              </div>
+              <div className="w-10 h-10 rounded-lg bg-red-100 flex items-center justify-center">
+                <Flame className="w-5 h-5 text-red-600" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-gray-500">{t('alerts.lowStock')}</p>
                 <p className="text-2xl font-bold text-red-500">
                   {pendingLowStockAlerts.length}
                 </p>
@@ -144,33 +189,22 @@ export function Alerts() {
             </div>
           </CardContent>
         </Card>
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-500">Critical</p>
-                <p className="text-2xl font-bold text-red-600">
-                  {pendingExpiryAlerts.filter(a => a.alertLevel === 'critical').length}
-                </p>
-              </div>
-              <div className="w-10 h-10 rounded-lg bg-red-100 flex items-center justify-center">
-                <AlertCircle className="w-5 h-5 text-red-600" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
       </div>
 
       {/* Alerts Tabs */}
       <Tabs defaultValue="expiry" className="space-y-4">
-        <TabsList className="grid w-full grid-cols-2">
+        <TabsList className="grid w-full grid-cols-3">
           <TabsTrigger value="expiry" className="gap-2">
             <Calendar className="w-4 h-4" />
-            Expiry Alerts ({pendingExpiryAlerts.length})
+            {t('alerts.expiryAlerts')} ({pendingExpiryAlerts.length})
           </TabsTrigger>
           <TabsTrigger value="stock" className="gap-2">
             <Package className="w-4 h-4" />
-            Low Stock ({pendingLowStockAlerts.length})
+            {t('alerts.lowStock')} ({pendingLowStockAlerts.length})
+          </TabsTrigger>
+          <TabsTrigger value="risk" className="gap-2">
+            <Flame className="w-4 h-4" />
+            {t('alerts.expiryRiskReport')} ({expiryRiskReport.length})
           </TabsTrigger>
         </TabsList>
 
@@ -180,7 +214,7 @@ export function Alerts() {
           )}>
             <CardHeader>
               <CardTitle className={settings.theme === 'dark' ? 'text-white' : ''}>
-                Expiry Alerts
+                {t('alerts.expiryAlerts')}
               </CardTitle>
             </CardHeader>
             <CardContent className="p-0">
@@ -188,13 +222,13 @@ export function Alerts() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Medicine</TableHead>
-                      <TableHead>Batch</TableHead>
-                      <TableHead>Expiry Date</TableHead>
-                      <TableHead>Days Left</TableHead>
-                      <TableHead>Quantity</TableHead>
-                      <TableHead>Level</TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
+                      <TableHead>{t('alerts.medicine')}</TableHead>
+                      <TableHead>{t('alerts.batch')}</TableHead>
+                      <TableHead>{t('alerts.expiryDate')}</TableHead>
+                      <TableHead>{t('alerts.daysLeft')}</TableHead>
+                      <TableHead>{t('common.quantity')}</TableHead>
+                      <TableHead>{t('common.status')}</TableHead>
+                      <TableHead className="text-right">{t('common.actions')}</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -223,7 +257,7 @@ export function Alerts() {
                             'font-medium',
                             alert.daysUntilExpiry <= 30 ? 'text-red-500' : 'text-amber-500'
                           )}>
-                            {alert.daysUntilExpiry} days
+                            {t('alerts.days', alert.daysUntilExpiry)}
                           </span>
                         </TableCell>
                         <TableCell>{alert.quantity}</TableCell>
@@ -245,7 +279,7 @@ export function Alerts() {
                               onClick={() => openResolveDialog(alert, 'expiry')}
                             >
                               <Check className="w-4 h-4 mr-1" />
-                              Resolve
+                              {t('alerts.resolve')}
                             </Button>
                           </div>
                         </TableCell>
@@ -255,7 +289,7 @@ export function Alerts() {
                       <TableRow>
                         <TableCell colSpan={7} className="text-center py-8 text-gray-500">
                           <Check className="w-12 h-12 mx-auto mb-4 opacity-30" />
-                          No pending expiry alerts
+                          {t('alerts.noExpiryAlerts')}
                         </TableCell>
                       </TableRow>
                     )}
@@ -272,7 +306,7 @@ export function Alerts() {
           )}>
             <CardHeader>
               <CardTitle className={settings.theme === 'dark' ? 'text-white' : ''}>
-                Low Stock Alerts
+                {t('alerts.lowStock')}
               </CardTitle>
             </CardHeader>
             <CardContent className="p-0">
@@ -280,12 +314,13 @@ export function Alerts() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Medicine</TableHead>
-                      <TableHead>Current Stock</TableHead>
-                      <TableHead>Reorder Level</TableHead>
-                      <TableHead>Reorder Qty</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
+                      <TableHead>{t('alerts.medicine')}</TableHead>
+                      <TableHead>{t('alerts.currentStock')}</TableHead>
+                      <TableHead>{t('alerts.reorderLevel')}</TableHead>
+                      <TableHead>{t('alerts.reorderQty')}</TableHead>
+                      <TableHead>{t('purchaseOrders.ordered')}</TableHead>
+                      <TableHead>{t('common.status')}</TableHead>
+                      <TableHead className="text-right">{t('common.actions')}</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -310,10 +345,42 @@ export function Alerts() {
                         <TableCell>{alert.reorderLevel}</TableCell>
                         <TableCell>{alert.reorderQuantity}</TableCell>
                         <TableCell>
-                          <Badge variant="destructive">Low Stock</Badge>
+                          {(() => {
+                            const pending = getMedicinePendingQty(alert.medicineId);
+                            return pending > 0 ? (
+                              <Badge variant="outline" className="text-emerald-600 border-emerald-300">
+                                {t('purchaseOrders.pendingQty', pending)}
+                              </Badge>
+                            ) : (
+                              <span className="text-gray-400 text-sm">—</span>
+                            );
+                          })()}
+                        </TableCell>
+                        <TableCell>
+                          {getMedicinePendingQty(alert.medicineId) > 0 ? (
+                            <div className="flex gap-1">
+                              <Badge variant="destructive">{t('alerts.lowStock')}</Badge>
+                              <Badge variant="outline" className="text-emerald-600 border-emerald-300">{t('purchaseOrders.ordered')}</Badge>
+                            </div>
+                          ) : (
+                            <Badge variant="destructive">{t('alerts.lowStock')}</Badge>
+                          )}
                         </TableCell>
                         <TableCell className="text-right">
                           <div className="flex justify-end gap-2">
+                            {getMedicinePendingQty(alert.medicineId) === 0 && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="text-emerald-500 border-emerald-300 hover:bg-emerald-50"
+                                onClick={() =>
+                                  navigate(`/purchase-orders?medicine=${alert.medicineId}&qty=${alert.reorderQuantity}`)
+                                }
+                              >
+                                <ShoppingCart className="w-4 h-4 mr-1" />
+                                {t('purchaseOrders.lowStockOrder')}
+                              </Button>
+                            )}
                             <Button
                               variant="ghost"
                               size="sm"
@@ -321,7 +388,7 @@ export function Alerts() {
                               onClick={() => openResolveDialog(alert, 'stock')}
                             >
                               <Check className="w-4 h-4 mr-1" />
-                              Resolve
+                              {t('alerts.resolve')}
                             </Button>
                           </div>
                         </TableCell>
@@ -329,11 +396,96 @@ export function Alerts() {
                     ))}
                     {pendingLowStockAlerts.length === 0 && (
                       <TableRow>
-                        <TableCell colSpan={6} className="text-center py-8 text-gray-500">
+                        <TableCell colSpan={7} className="text-center py-8 text-gray-500">
                           <Check className="w-12 h-12 mx-auto mb-4 opacity-30" />
-                          No pending low stock alerts
+                          {t('alerts.noLowStockAlerts')}
                         </TableCell>
                       </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </ScrollArea>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Expiry Risk Report */}
+        <TabsContent value="risk">
+          <Card className={cn(settings.theme === 'dark' && 'bg-gray-800 border-gray-700')}>
+            <CardHeader>
+              <CardTitle className={cn('flex items-center gap-2', settings.theme === 'dark' ? 'text-white' : '')}>
+                <Flame className="w-5 h-5 text-red-500" />
+                {t('alerts.expiryRiskReport')}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              <ScrollArea className="h-[500px]">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>{t('alerts.medicine')}</TableHead>
+                      <TableHead>{t('alerts.batch')}</TableHead>
+                      <TableHead>{t('alerts.daysLeft')}</TableHead>
+                      <TableHead>{t('alerts.riskPct')}</TableHead>
+                      <TableHead>{t('common.quantity')}</TableHead>
+                      <TableHead>{t('alerts.potentialLoss')}</TableHead>
+                      <TableHead>{t('alerts.recommendation')}</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {expiryRiskReport.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={7} className="text-center py-8 text-gray-500">
+                          <Check className="w-12 h-12 mx-auto mb-4 opacity-30" />
+                          {t('alerts.noRiskBatches')}
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      expiryRiskReport.map((r) => (
+                        <TableRow key={r.batchId}>
+                          <TableCell>
+                            <p className={cn('font-medium', settings.theme === 'dark' ? 'text-white' : 'text-gray-900')}>
+                              {r.medicineName}
+                            </p>
+                          </TableCell>
+                          <TableCell>{r.batchNumber}</TableCell>
+                          <TableCell>
+                            <span className={cn(
+                              'font-medium',
+                              r.daysUntilExpiry <= 30 ? 'text-red-500' : r.daysUntilExpiry <= 60 ? 'text-amber-500' : 'text-blue-500'
+                            )}>
+                              {r.daysUntilExpiry}d
+                            </span>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              <Progress value={r.riskPercent} className="h-2 w-20" />
+                              <span className={cn(
+                                'text-xs font-medium',
+                                r.riskPercent >= 80 ? 'text-red-600' : r.riskPercent >= 50 ? 'text-amber-600' : 'text-blue-600'
+                              )}>
+                                {r.riskPercent}%
+                              </span>
+                            </div>
+                          </TableCell>
+                          <TableCell>{r.quantity}</TableCell>
+                          <TableCell>
+                            <span className="text-red-600 font-medium">
+                              Rs. {r.potentialLoss.toLocaleString('en-PK', { maximumFractionDigits: 0 })}
+                            </span>
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant={
+                              r.recommendation === 'write_off' ? 'destructive' :
+                              r.recommendation === 'sell_urgently' ? 'destructive' :
+                              r.recommendation === 'return_to_supplier' ? 'outline' :
+                              'secondary'
+                            } className="capitalize text-xs">
+                              {r.recommendation?.replace(/_/g, ' ')}
+                            </Badge>
+                          </TableCell>
+                        </TableRow>
+                      ))
                     )}
                   </TableBody>
                 </Table>
@@ -347,9 +499,9 @@ export function Alerts() {
       <Dialog open={showResolveDialog} onOpenChange={setShowResolveDialog}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Resolve Alert</DialogTitle>
+            <DialogTitle>{t('alerts.resolveTitle')}</DialogTitle>
             <DialogDescription>
-              Are you sure you want to mark this alert as resolved?
+              {t('alerts.resolveConfirm')}
             </DialogDescription>
           </DialogHeader>
           
@@ -358,13 +510,13 @@ export function Alerts() {
               <p className="font-medium">{selectedAlert.medicineName}</p>
               {alertType === 'expiry' ? (
                 <p className="text-sm text-gray-500">
-                  Batch: {selectedAlert.batchNumber} | 
-                  Expires in {selectedAlert.daysUntilExpiry} days
+                  {t('alerts.batch')}: {selectedAlert.batchNumber} | 
+                  {t('alerts.expiresInDays', selectedAlert.daysUntilExpiry)}
                 </p>
               ) : (
                 <p className="text-sm text-gray-500">
-                  Current Stock: {selectedAlert.currentStock} | 
-                  Reorder Level: {selectedAlert.reorderLevel}
+                  {t('alerts.currentStock')}: {selectedAlert.currentStock} | 
+                  {t('alerts.reorderLevel')}: {selectedAlert.reorderLevel}
                 </p>
               )}
             </div>
@@ -372,14 +524,14 @@ export function Alerts() {
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowResolveDialog(false)}>
-              Cancel
+              {t('common.cancel')}
             </Button>
             <Button 
               className="bg-emerald-500 hover:bg-emerald-600"
               onClick={handleResolve}
             >
               <Check className="w-4 h-4 mr-2" />
-              Mark Resolved
+              {t('alerts.markResolved')}
             </Button>
           </DialogFooter>
         </DialogContent>

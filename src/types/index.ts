@@ -1,6 +1,18 @@
-// Pharmacy POS System Types
+// Pharmacy POS System Types — FEFO-first, SaaS-ready, Pakistan market
 
-export type UserRole = 'owner' | 'manager' | 'cashier' | 'pharmacist' | 'accountant';
+// ─── Tenant / SaaS Layer ────────────────────────────────────────────────────
+export type SubscriptionPlan = 'basic' | 'pro' | 'enterprise';
+
+export interface Tenant {
+  id: string;
+  name: string;
+  subscriptionPlan: SubscriptionPlan;
+  isActive: boolean;
+  createdAt: Date;
+}
+
+// ─── RBAC ──────────────────────────────────────────────────────────────────
+export type UserRole = 'superadmin' | 'owner' | 'manager' | 'cashier' | 'salesman' | 'pharmacist' | 'accountant';
 
 export interface User {
   id: string;
@@ -30,6 +42,9 @@ export interface Branch {
   createdAt: Date;
 }
 
+// ─── OTC / Prescription / Controlled classification ───────────────────────
+export type DrugClassification = 'otc' | 'prescription' | 'controlled';
+
 export interface Medicine {
   id: string;
   name: string;
@@ -44,6 +59,12 @@ export interface Medicine {
   barcode?: string;
   qrCode?: string;
   isPrescriptionRequired: boolean;
+  /** OTC, Prescription, or Controlled drug */
+  classification: DrugClassification;
+  /** Generic substitutes (medicine IDs) */
+  substituteIds?: string[];
+  /** Controlled drug schedule (e.g. Schedule-III) */
+  controlledSchedule?: string;
   isActive: boolean;
   reorderLevel: number;
   reorderQuantity: number;
@@ -101,6 +122,12 @@ export interface Batch {
   location?: string;
   isActive: boolean;
   createdAt: Date;
+  /** FEFO: days until expiry (computed helper) */
+  daysUntilExpiry?: number;
+  /** Expiry risk percentage 0–100 (computed helper) */
+  expiryRiskPercent?: number;
+  /** Profit per unit (salePrice - purchasePrice) */
+  profitPerUnit?: number;
 }
 
 export interface Stock {
@@ -197,10 +224,15 @@ export interface SaleItem {
   batchNumber: string;
   quantity: number;
   unitPrice: number;
+  purchasePrice: number;
+  /** Gross profit = (unitPrice - purchasePrice) * quantity */
+  profit: number;
   discountPercent: number;
   taxPercent: number;
   total: number;
   expiryDate: Date;
+  /** Whether cashier overrode FEFO suggestion */
+  fefoOverride?: boolean;
 }
 
 export type SaleStatus = 'pending' | 'completed' | 'returned' | 'cancelled';
@@ -250,6 +282,30 @@ export interface Customer {
   loyaltyPoints: number;
 }
 
+// ─── Prescription ───────────────────────────────────────────────────────────
+export interface PrescriptionItem {
+  medicineId: string;
+  medicineName: string;
+  quantity: number;
+  dosageInstructions?: string;
+  unitPrice: number;
+}
+
+export interface Prescription {
+  id: string;
+  customerId: string;
+  customerName: string;
+  doctorName: string;
+  prescriptionNumber?: string;
+  items: PrescriptionItem[];
+  /** Sale IDs linked to this prescription */
+  saleIds: string[];
+  isActive: boolean;
+  notes?: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 export interface ExpiryAlert {
   id: string;
   batchId: string;
@@ -278,12 +334,20 @@ export interface LowStockAlert {
 export interface DashboardStats {
   todaySales: number;
   todayTransactions: number;
+  todayProfit: number;
   monthSales: number;
+  monthProfit: number;
   yearSales: number;
   lowStockCount: number;
   expiryAlertsCount: number;
   pendingPurchases: number;
   supplierPayables: number;
+  /** Stock accuracy % (resolved alerts / total alerts) */
+  stockAccuracyPercent: number;
+  /** Dead stock value (items not sold in 90 days) */
+  deadStockValue: number;
+  /** Inventory turnover rate */
+  inventoryTurnoverRate: number;
 }
 
 export interface SalesReport {
@@ -313,6 +377,100 @@ export interface ProfitReport {
   profitMargin: number;
 }
 
+// ─── Financial Intelligence Types ──────────────────────────────────────────
+export type LedgerEntryType = 'income' | 'expense' | 'payable' | 'receivable';
+
+export interface LedgerEntry {
+  id: string;
+  type: LedgerEntryType;
+  referenceId: string;
+  referenceType: 'sale' | 'purchase' | 'expense' | 'payment';
+  amount: number;
+  description: string;
+  createdBy: string;
+  createdAt: Date;
+}
+
+export interface BatchProfitReport {
+  batchId: string;
+  batchNumber: string;
+  medicineId: string;
+  medicineName: string;
+  supplierId: string;
+  supplierName: string;
+  totalSold: number;
+  revenue: number;
+  cost: number;
+  profit: number;
+  margin: number;
+  expiryDate: Date;
+}
+
+export interface SupplierProfitReport {
+  supplierId: string;
+  supplierName: string;
+  totalPurchases: number;
+  totalRevenue: number;
+  totalCost: number;
+  grossProfit: number;
+  profitMargin: number;
+}
+
+export interface Expense {
+  id: string;
+  category: 'rent' | 'salary' | 'utilities' | 'marketing' | 'other';
+  description: string;
+  amount: number;
+  date: Date;
+  createdBy: string;
+  createdAt: Date;
+}
+
+// ─── FEFO / Expiry Intelligence ────────────────────────────────────────────
+export interface ExpiryRiskReport {
+  medicineId: string;
+  medicineName: string;
+  batchId: string;
+  batchNumber: string;
+  expiryDate: Date;
+  daysUntilExpiry: number;
+  /** 0–100: 100 = expires today */
+  riskPercent: number;
+  quantity: number;
+  potentialLoss: number;
+  recommendation: 'sell_urgently' | 'promote' | 'return_to_supplier' | 'write_off';
+}
+
+export interface SlowMovingItem {
+  medicineId: string;
+  medicineName: string;
+  lastSoldDate?: Date;
+  daysSinceLastSale: number;
+  stockQuantity: number;
+  stockValue: number;
+  reorderSuggested: boolean;
+}
+
+// ─── KPI Framework ─────────────────────────────────────────────────────────
+export interface PharmacyKPIs {
+  /** % reduction in expiry loss vs previous period */
+  expiryLossReductionPercent: number;
+  /** Current stock accuracy % */
+  stockAccuracyPercent: number;
+  /** Sales growth % vs previous period */
+  salesGrowthPercent: number;
+  /** Inventory turnover rate (times/year) */
+  inventoryTurnoverRate: number;
+  /** Dead stock ratio (dead_value / total_stock_value) */
+  deadStockRatio: number;
+  /** Gross profit margin % */
+  grossProfitMarginPercent: number;
+  /** Average transaction value */
+  avgTransactionValue: number;
+  /** Cash vs Credit sales ratio */
+  cashCreditRatio: number;
+}
+
 export interface TaxReport {
   date: Date;
   totalSales: number;
@@ -330,7 +488,7 @@ export interface AppSettings {
   companyGst: string;
   defaultTaxRate: number;
   currency: string;
-  language: 'en' | 'ur';
+  language: 'en' | 'ar' | 'ur';
   dateFormat: string;
   timeFormat: string;
   receiptPrinter?: string;
@@ -342,6 +500,38 @@ export interface AppSettings {
   fbrIntegration: boolean;
   fbrApiKey?: string;
   theme: 'light' | 'dark' | 'system';
+  /** FEFO enforcement: 'strict' (force nearest expiry) | 'suggest' (warn but allow override) */
+  fefoMode: 'strict' | 'suggest';
+  /** Expiry alert thresholds in days */
+  expiryAlertDays: { critical: number; warning: number; notice: number };
+  /** Offline mode: sync queued writes when back online */
+  offlineModeEnabled: boolean;
+  /** Owner-controlled: whether managers can see profit details */
+  managerCanSeeProfit: boolean;
+  /** Receipt footer text */
+  receiptFooterText: string;
+  /** Auto-print receipt after sale */
+  autoPrintReceipt: boolean;
+  /** Show profit margin on POS */
+  showProfitOnPOS: boolean;
+  /** Enable expiry alerts */
+  enableExpiryAlerts: boolean;
+  /** Enable low-stock alerts */
+  enableLowStockAlerts: boolean;
+  /** Payment method toggles */
+  enableJazzCash: boolean;
+  enableEasyPaisa: boolean;
+  enableCardPayments: boolean;
+  /** Print company logo on receipt */
+  printCompanyLogo: boolean;
+  /** Automatic backup */
+  autoBackup: boolean;
+  /** Backup time */
+  backupTime: string;
+  /** Platform module toggles (super-admin controlled) */
+  posEnabled: boolean;
+  managementEnabled: boolean;
+  webStoreEnabled: boolean;
 }
 
 export interface AuditLog {
@@ -351,6 +541,61 @@ export interface AuditLog {
   action: string;
   module: string;
   details: string;
+  /** Structured entity snapshot for tamper-evidence */
+  entitySnapshot?: Record<string, unknown>;
   ipAddress?: string;
   createdAt: Date;
+}
+
+// ─── Offline Sync Queue ────────────────────────────────────────────────────
+export type SyncStatus = 'pending' | 'synced' | 'failed';
+
+export interface SyncQueueItem {
+  id: string;
+  operation: 'create' | 'update' | 'delete';
+  entity: string;
+  payload: Record<string, unknown>;
+  retries: number;
+  status: SyncStatus;
+  createdAt: Date;
+}
+
+// ─── Web Store (Customer-facing) ───────────────────────────────────────────
+export type WebPaymentMethod = 'cod' | 'jazzcash' | 'easypaisa' | 'card';
+export type WebOrderStatus = 'pending' | 'confirmed' | 'preparing' | 'shipped' | 'delivered' | 'cancelled';
+
+export interface WebOrder {
+  id: string;
+  customerName: string;
+  customerPhone: string;
+  customerEmail?: string;
+  customerAddress: string;
+  customerCity: string;
+  items: WebOrderItem[];
+  subtotal: number;
+  deliveryFee: number;
+  total: number;
+  paymentMethod: WebPaymentMethod;
+  paymentStatus: 'pending' | 'paid' | 'failed';
+  orderStatus: WebOrderStatus;
+  notes?: string;
+  createdAt: string;
+}
+
+export interface WebOrderItem {
+  medicineId: string;
+  name: string;
+  quantity: number;
+  price: number;
+  total: number;
+}
+
+export interface WebCartItem {
+  medicineId: string;
+  name: string;
+  category: string;
+  strength: string;
+  price: number;
+  quantity: number;
+  maxQuantity: number;
 }

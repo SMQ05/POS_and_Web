@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore, useSettingsStore } from '@/store';
+import { useTranslation } from '@/hooks/useTranslation';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -13,6 +14,7 @@ export function Login() {
   const navigate = useNavigate();
   const { login } = useAuthStore();
   const { settings, toggleTheme, setLanguage } = useSettingsStore();
+  const { t, isRTL, dir } = useTranslation();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -30,10 +32,10 @@ export function Login() {
       if (success) {
         navigate('/');
       } else {
-        setError('Invalid email or password');
+        setError(t('login.invalidCredentials'));
       }
     } catch (err) {
-      setError('An error occurred. Please try again.');
+      setError(t('login.errorOccurred'));
     } finally {
       setIsLoading(false);
     }
@@ -41,21 +43,23 @@ export function Login() {
 
   const quickLogin = (role: string) => {
     const emails: Record<string, string> = {
+      superadmin: 'superadmin@pharmapos.pk',
       owner: 'owner@pharmapos.pk',
       manager: 'manager@pharmapos.pk',
       cashier: 'cashier@pharmapos.pk',
+      salesman: 'salesman@pharmapos.pk',
     };
     setEmail(emails[role] || '');
     setPassword('password');
   };
 
   return (
-    <div className={cn(
+    <div dir={dir} className={cn(
       'min-h-screen flex items-center justify-center p-4 transition-colors duration-300',
       settings.theme === 'dark' ? 'bg-gray-900' : 'bg-gradient-to-br from-emerald-50 to-teal-100'
     )}>
       {/* Theme & Language Toggles */}
-      <div className="absolute top-4 right-4 flex gap-2">
+      <div className={cn('absolute top-4 flex gap-2', isRTL ? 'left-4' : 'right-4')}>
         <Button
           variant="ghost"
           size="icon"
@@ -67,7 +71,10 @@ export function Login() {
         <Button
           variant="ghost"
           size="icon"
-          onClick={() => setLanguage(settings.language === 'en' ? 'ur' : 'en')}
+          onClick={() => {
+            const cycle: Record<string, 'en' | 'ar' | 'ur'> = { en: 'ur', ur: 'en', ar: 'en' };
+            setLanguage(cycle[settings.language] || 'en');
+          }}
           className={settings.theme === 'dark' ? 'text-white' : ''}
         >
           <Globe className="w-5 h-5" />
@@ -90,7 +97,7 @@ export function Login() {
             'mt-2',
             settings.theme === 'dark' ? 'text-gray-400' : 'text-gray-600'
           )}>
-            Pharmacy Management System for Pakistan
+            {t('login.subtitle')}
           </p>
         </div>
 
@@ -99,9 +106,9 @@ export function Login() {
           settings.theme === 'dark' && 'bg-gray-800 border-gray-700'
         )}>
           <CardHeader className="space-y-1">
-            <CardTitle className="text-2xl text-center">Welcome Back</CardTitle>
+            <CardTitle className="text-2xl text-center">{t('login.welcomeBack')}</CardTitle>
             <CardDescription className="text-center">
-              Enter your credentials to access your account
+              {t('login.enterCredentials')}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -113,9 +120,9 @@ export function Login() {
               )}
 
               <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
+                <Label htmlFor="email">{t('login.email')}</Label>
                 <div className="relative">
-                  <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                  <Mail className={cn('absolute top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400', isRTL ? 'right-3' : 'left-3')} />
                   <Input
                     id="email"
                     type="email"
@@ -123,7 +130,7 @@ export function Login() {
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     className={cn(
-                      'pl-10',
+                      isRTL ? 'pr-10' : 'pl-10',
                       settings.theme === 'dark' && 'bg-gray-700 border-gray-600'
                     )}
                     required
@@ -132,17 +139,17 @@ export function Login() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="password">Password</Label>
+                <Label htmlFor="password">{t('login.password')}</Label>
                 <div className="relative">
-                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                  <Lock className={cn('absolute top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400', isRTL ? 'right-3' : 'left-3')} />
                   <Input
                     id="password"
                     type={showPassword ? 'text' : 'password'}
-                    placeholder="Enter your password"
+                    placeholder={t('login.enterPassword')}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     className={cn(
-                      'pl-10 pr-10',
+                      isRTL ? 'pr-10 pl-10' : 'pl-10 pr-10',
                       settings.theme === 'dark' && 'bg-gray-700 border-gray-600'
                     )}
                     required
@@ -150,7 +157,7 @@ export function Login() {
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    className={cn('absolute top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600', isRTL ? 'left-3' : 'right-3')}
                   >
                     {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
@@ -158,18 +165,18 @@ export function Login() {
               </div>
 
               <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-2">
+                <div className={cn('flex items-center', isRTL ? 'space-x-reverse space-x-2' : 'space-x-2')}>
                   <Checkbox
                     id="remember"
                     checked={rememberMe}
                     onCheckedChange={(checked) => setRememberMe(checked as boolean)}
                   />
                   <Label htmlFor="remember" className="text-sm font-normal">
-                    Remember me
+                    {t('login.rememberMe')}
                   </Label>
                 </div>
                 <Button variant="link" className="text-sm p-0 h-auto">
-                  Forgot password?
+                  {t('login.forgotPassword')}
                 </Button>
               </div>
 
@@ -178,7 +185,7 @@ export function Login() {
                 className="w-full bg-emerald-500 hover:bg-emerald-600"
                 disabled={isLoading}
               >
-                {isLoading ? 'Signing in...' : 'Sign In'}
+                {isLoading ? t('login.signingIn') : t('login.signIn')}
               </Button>
             </form>
           </CardContent>
@@ -188,10 +195,19 @@ export function Login() {
                 <div className="w-full border-t border-gray-200" />
               </div>
               <div className="relative flex justify-center text-xs uppercase">
-                <span className="bg-white px-2 text-gray-500">Quick Login (Demo)</span>
+                <span className="bg-white px-2 text-gray-500">{t('login.quickLogin')}</span>
               </div>
             </div>
-            <div className="flex gap-2 w-full">
+            <div className="flex gap-2 w-full flex-wrap">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => quickLogin('superadmin')}
+                className="flex-1 border-gray-900 text-gray-900"
+              >
+                Super Admin
+              </Button>
               <Button
                 type="button"
                 variant="outline"
@@ -199,7 +215,7 @@ export function Login() {
                 onClick={() => quickLogin('owner')}
                 className="flex-1"
               >
-                Owner
+                {t('roles.owner')}
               </Button>
               <Button
                 type="button"
@@ -208,7 +224,7 @@ export function Login() {
                 onClick={() => quickLogin('manager')}
                 className="flex-1"
               >
-                Manager
+                {t('roles.manager')}
               </Button>
               <Button
                 type="button"
@@ -217,7 +233,16 @@ export function Login() {
                 onClick={() => quickLogin('cashier')}
                 className="flex-1"
               >
-                Cashier
+                {t('roles.cashier')}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => quickLogin('salesman')}
+                className="flex-1"
+              >
+                {t('roles.salesman')}
               </Button>
             </div>
           </CardFooter>
@@ -227,7 +252,7 @@ export function Login() {
           'text-center text-sm mt-6',
           settings.theme === 'dark' ? 'text-gray-400' : 'text-gray-600'
         )}>
-          © 2024 PharmaPOS Pakistan. All rights reserved.
+          © 2024 PharmaPOS Pakistan. {t('login.allRightsReserved')}
         </p>
       </div>
     </div>

@@ -1,4 +1,5 @@
-import { useAuthStore, useSettingsStore, useDashboardStore } from '@/store';
+import { useAuthStore, useSettingsStore, useDashboardStore, useInventoryStore } from '@/store';
+import { useTranslation } from '@/hooks/useTranslation';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import {
@@ -25,20 +26,15 @@ import {
 export function Header() {
   const { currentUser } = useAuthStore();
   const { settings, toggleTheme, setLanguage } = useSettingsStore();
-  const { expiryAlerts, lowStockAlerts } = useDashboardStore();
+  const { dismissedExpiryAlertIds, dismissedLowStockAlertIds } = useDashboardStore();
+  const { getLiveExpiryAlerts, getLiveLowStockAlerts } = useInventoryStore();
+  const { t, isRTL } = useTranslation();
 
-  const totalAlerts = expiryAlerts.filter(a => !a.isResolved).length + 
-                      lowStockAlerts.filter(a => !a.isResolved).length;
+  const totalAlerts = getLiveExpiryAlerts().filter(a => !dismissedExpiryAlertIds.includes(a.id)).length + 
+                      getLiveLowStockAlerts().filter(a => !dismissedLowStockAlertIds.includes(a.id)).length;
 
   const getRoleLabel = (role: string) => {
-    const labels: Record<string, string> = {
-      owner: 'Owner',
-      manager: 'Manager',
-      cashier: 'Cashier',
-      pharmacist: 'Pharmacist',
-      accountant: 'Accountant',
-    };
-    return labels[role] || role;
+    return t(`roles.${role}`) || role;
   };
 
   return (
@@ -51,11 +47,12 @@ export function Header() {
       {/* Search */}
       <div className="flex-1 max-w-xl">
         <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <Search className={cn('absolute top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400', isRTL ? 'right-3' : 'left-3')} />
           <Input
-            placeholder="Search medicines, batches, invoices..."
+            placeholder={t('header.searchPlaceholder')}
             className={cn(
-              'pl-10 w-full',
+              'w-full',
+              isRTL ? 'pr-10' : 'pl-10',
               settings.theme === 'dark' && 'bg-gray-800 border-gray-700'
             )}
           />
@@ -71,14 +68,17 @@ export function Header() {
           className="gap-2"
         >
           <Store className="w-4 h-4" />
-          <span className="hidden sm:inline">Main Branch - Lahore</span>
+          <span className="hidden sm:inline">{t('header.mainBranch')}</span>
         </Button>
 
         {/* Language Toggle */}
         <Button
           variant="ghost"
           size="icon"
-          onClick={() => setLanguage(settings.language === 'en' ? 'ur' : 'en')}
+          onClick={() => {
+            const cycle: Record<string, 'en' | 'ur'> = { en: 'ur', ur: 'en' };
+            setLanguage(cycle[settings.language] || 'en');
+          }}
           className="relative"
         >
           <Globe className="w-5 h-5" />
@@ -115,12 +115,12 @@ export function Header() {
               )}
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-80">
-            <DropdownMenuLabel>Notifications</DropdownMenuLabel>
+          <DropdownMenuContent align={isRTL ? 'start' : 'end'} className="w-80">
+            <DropdownMenuLabel>{t('common.notifications')}</DropdownMenuLabel>
             <DropdownMenuSeparator />
             {totalAlerts === 0 ? (
               <div className="p-4 text-center text-gray-500">
-                No new notifications
+                {t('common.noNotifications')}
               </div>
             ) : (
               <>
@@ -130,7 +130,7 @@ export function Header() {
                     <div className="flex-1">
                       <p className="text-sm font-medium">{alert.medicineName}</p>
                       <p className="text-xs text-gray-500">
-                        Expires in {alert.daysUntilExpiry} days
+                        {t('header.expiresIn', alert.daysUntilExpiry)}
                       </p>
                     </div>
                   </DropdownMenuItem>
@@ -141,7 +141,7 @@ export function Header() {
                     <div className="flex-1">
                       <p className="text-sm font-medium">{alert.medicineName}</p>
                       <p className="text-xs text-gray-500">
-                        Low stock: {alert.currentStock} remaining
+                        {t('header.lowStock', alert.currentStock)}
                       </p>
                     </div>
                   </DropdownMenuItem>
@@ -170,14 +170,14 @@ export function Header() {
               </div>
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuLabel>My Account</DropdownMenuLabel>
+          <DropdownMenuContent align={isRTL ? 'start' : 'end'}>
+            <DropdownMenuLabel>{t('common.myAccount')}</DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuItem>Profile</DropdownMenuItem>
-            <DropdownMenuItem>Change Password</DropdownMenuItem>
+            <DropdownMenuItem>{t('common.profile')}</DropdownMenuItem>
+            <DropdownMenuItem>{t('common.changePassword')}</DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem className="text-red-600">
-              Logout
+              {t('common.logout')}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

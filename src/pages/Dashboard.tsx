@@ -1,9 +1,12 @@
 import { useNavigate } from 'react-router-dom';
-import { useSettingsStore, useDashboardStore, useSalesStore, useInventoryStore, useSupplierStore } from '@/store';
-import { cn } from '@/lib/utils';
+import { useSettingsStore, useDashboardStore, useSalesStore, useInventoryStore, useSupplierStore, useAuthStore } from '@/store';
+import { useTranslation } from '@/hooks/useTranslation';
+import { cn, formatCurrency } from '@/lib/utils';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Progress } from '@/components/ui/progress';
+import { UnpaidBillsSlider } from '@/components/UnpaidBillsSlider';
 import {
   ShoppingCart,
   Package,
@@ -14,6 +17,10 @@ import {
   Receipt,
   ArrowRight,
   Calendar,
+  DollarSign,
+  Activity,
+  Flame,
+  BarChart3,
 } from 'lucide-react';
 import {
   LineChart,
@@ -51,59 +58,136 @@ const COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6'];
 export function Dashboard() {
   const navigate = useNavigate();
   const { settings } = useSettingsStore();
-  const { expiryAlerts, lowStockAlerts } = useDashboardStore();
-  const { getTodaySales } = useSalesStore();
-  const { medicines } = useInventoryStore();
+  const { dismissedExpiryAlertIds, dismissedLowStockAlertIds } = useDashboardStore();
+  const { getTodaySales, getTodayProfit, getTotalProfit, computeKPIs } = useSalesStore();
+  const { medicines, batches, getExpiryRiskReport, getLiveExpiryAlerts, getLiveLowStockAlerts } = useInventoryStore();
   const { suppliers } = useSupplierStore();
+  const { currentUser } = useAuthStore();
+  const { t, isRTL } = useTranslation();
+
+  const role = currentUser?.role ?? 'cashier';
+  const isOwnerOrManager = role === 'owner' || role === 'manager';
+  const canSeeProfit = role === 'owner' || (role === 'manager' && settings.managerCanSeeProfit);
 
   const todaySales = getTodaySales();
   const todayRevenue = todaySales.reduce((sum, s) => sum + s.totalAmount, 0);
+  const todayProfit = getTodayProfit();
+  const totalProfit = getTotalProfit();
+  const kpis = computeKPIs(batches);
+  const expiryRiskReport = getExpiryRiskReport().slice(0, 5);
 
-  const statCards = [
+  // Live computed alerts
+  const expiryAlerts = getLiveExpiryAlerts().filter(a => !dismissedExpiryAlertIds.includes(a.id));
+  const lowStockAlerts = getLiveLowStockAlerts().filter(a => !dismissedLowStockAlertIds.includes(a.id));
+
+  const criticalExpiry = expiryAlerts.filter(a => a.alertLevel === 'critical').length;
+  const totalPayables = suppliers.reduce((sum, s) => sum + s.currentBalance, 0);
+
+  // Business health score (0–100)
+  const healthScore = Math.max(0, Math.min(100,
+    50
+    + (kpis.grossProfitMarginPercent > 20 ? 20 : kpis.grossProfitMarginPercent)
+    - (criticalExpiry * 5)
+    - (lowStockAlerts.length * 2)
+  ));
+  const healthColor = healthScore >= 70 ? 'text-emerald-500' : healthScore >= 40 ? 'text-amber-500' : 'text-red-500';
+  const healthBg = healthScore >= 70 ? 'bg-emerald-100' : healthScore >= 40 ? 'bg-amber-100' : 'bg-red-100';
+
+  // ─── Stat cards: cashier sees only sales/stock-relevant cards ───
+  const allStatCards = [
     {
-      title: "Today's Sales",
-      value: `Rs. ${todayRevenue.toLocaleString()}`,
-      change: '+12%',
+      title: t('dashboard.todaySales'),
+      value: formatCurrency(todayRevenue, settings.currency),
+      change: t('dashboard.transactions', todaySales.length),
       trend: 'up',
       icon: ShoppingCart,
       color: 'emerald',
       onClick: () => navigate('/sales'),
+      roles: ['owner', 'manager', 'cashier', 'salesman', 'pharmacist', 'accountant'],
     },
     {
-      title: 'Total Medicines',
+      title: t('dashboard.todayProfit'),
+      value: formatCurrency(todayProfit, settings.currency),
+      change: todayRevenue > 0 ? t('dashboard.margin', ((todayProfit / todayRevenue) * 100).toFixed(1)) : '--',
+      trend: todayProfit > 0 ? 'up' : 'neutral',
+      icon: DollarSign,
+      color: 'emerald',
+      onClick: () => navigate('/reports'),
+      roles: ['owner', ...(settings.managerCanSeeProfit ? ['manager'] : []), 'accountant'],
+    },
+    {
+      title: t('dashboard.totalMedicines'),
       value: medicines.length.toString(),
-      change: '+5',
+      change: t('dashboard.activeBatches', batches.filter(b => b.isActive && b.quantity > 0).length),
       trend: 'up',
       icon: Package,
       color: 'blue',
       onClick: () => navigate('/medicines'),
+      roles: ['owner', 'manager', 'pharmacist'],
     },
     {
-      title: 'Low Stock Items',
-      value: lowStockAlerts.filter(a => !a.isResolved).length.toString(),
-      change: 'Action needed',
-      trend: 'down',
+      title: t('dashboard.expiryAlerts'),
+      value: expiryAlerts.length.toString(),
+      change: criticalExpiry > 0 ? t('dashboard.critical', criticalExpiry) : t('dashboard.allClear'),
+      trend: criticalExpiry > 0 ? 'down' : 'up',
       icon: AlertTriangle,
+      color: criticalExpiry > 0 ? 'red' : 'emerald',
+      onClick: () => navigate('/alerts'),
+      roles: ['owner', 'manager', 'pharmacist'],
+    },
+    {
+      title: t('dashboard.lowStockItems'),
+      value: lowStockAlerts.length.toString(),
+      change: t('dashboard.actionNeeded'),
+      trend: 'down',
+      icon: TrendingDown,
       color: 'red',
       onClick: () => navigate('/alerts'),
+      roles: ['owner', 'manager', 'pharmacist'],
     },
     {
-      title: 'Supplier Payables',
-      value: `Rs. ${suppliers.reduce((sum, s) => sum + s.currentBalance, 0).toLocaleString()}`,
-      change: 'Due soon',
+      title: t('dashboard.supplierPayables'),
+      value: formatCurrency(totalPayables, settings.currency),
+      change: t('dashboard.dueSoon'),
       trend: 'neutral',
       icon: Truck,
       color: 'amber',
       onClick: () => navigate('/suppliers'),
+      roles: ['owner', 'manager', 'accountant'],
+    },
+    {
+      title: t('dashboard.grossProfitMargin'),
+      value: `${kpis.grossProfitMarginPercent.toFixed(1)}%`,
+      change: t('dashboard.totalProfit', formatCurrency(totalProfit, settings.currency)),
+      trend: kpis.grossProfitMarginPercent > 15 ? 'up' : 'down',
+      icon: TrendingUp,
+      color: kpis.grossProfitMarginPercent > 15 ? 'emerald' : 'red',
+      onClick: () => navigate('/reports'),
+      roles: ['owner', ...(settings.managerCanSeeProfit ? ['manager'] : [])],
+    },
+    {
+      title: t('dashboard.inventoryTurnover'),
+      value: `${kpis.inventoryTurnoverRate.toFixed(1)}x`,
+      change: t('dashboard.rate60d'),
+      trend: kpis.inventoryTurnoverRate > 1 ? 'up' : 'neutral',
+      icon: BarChart3,
+      color: 'blue',
+      onClick: () => navigate('/reports'),
+      roles: ['owner', 'manager'],
     },
   ];
 
-  const quickActions = [
-    { label: 'New Sale', icon: ShoppingCart, path: '/pos', color: 'bg-emerald-500' },
-    { label: 'Add Medicine', icon: Package, path: '/medicines', color: 'bg-blue-500' },
-    { label: 'Create PO', icon: Receipt, path: '/suppliers', color: 'bg-amber-500' },
-    { label: 'View Reports', icon: TrendingUp, path: '/reports', color: 'bg-purple-500' },
+  const statCards = allStatCards.filter(c => c.roles.includes(role));
+
+  // ─── Quick actions: role-gated ───
+  const allQuickActions = [
+    { label: t('dashboard.quickActions.newSale'), icon: ShoppingCart, path: '/pos', color: 'bg-emerald-500', roles: ['owner', 'manager', 'cashier', 'salesman'] },
+    { label: t('dashboard.quickActions.addMedicine'), icon: Package, path: '/medicines', color: 'bg-blue-500', roles: ['owner', 'manager', 'pharmacist'] },
+    { label: t('dashboard.quickActions.createPO'), icon: Receipt, path: '/suppliers', color: 'bg-amber-500', roles: ['owner', 'manager'] },
+    { label: t('dashboard.quickActions.viewReports'), icon: TrendingUp, path: '/reports', color: 'bg-purple-500', roles: ['owner', 'manager', 'accountant'] },
   ];
+
+  const quickActions = allQuickActions.filter(a => a.roles.includes(role));
 
   return (
     <div className="space-y-6">
@@ -114,13 +198,15 @@ export function Dashboard() {
             'text-2xl font-bold',
             settings.theme === 'dark' ? 'text-white' : 'text-gray-900'
           )}>
-            Dashboard
+            {t('dashboard.title')}
           </h1>
           <p className={cn(
             'text-sm',
             settings.theme === 'dark' ? 'text-gray-400' : 'text-gray-600'
           )}>
-            Welcome back! Here's what's happening today.
+            {isOwnerOrManager
+              ? t('dashboard.welcomeOwner')
+              : t('dashboard.welcomeStaff', currentUser?.name ?? 'User')}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -155,6 +241,11 @@ export function Dashboard() {
           </Button>
         ))}
       </div>
+
+      {/* Unpaid Bills Slider — cashier & salesman */}
+      {(role === 'cashier' || role === 'salesman') && (
+        <UnpaidBillsSlider />
+      )}
 
       {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -218,7 +309,104 @@ export function Dashboard() {
         ))}
       </div>
 
-      {/* Charts Row */}
+      {/* Business Health Score + Expiry Risk Row — owner/manager only */}
+      {isOwnerOrManager && (
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Business Health Score */}
+        <Card className={cn(settings.theme === 'dark' && 'bg-gray-800 border-gray-700')}>
+          <CardHeader className="flex flex-row items-center gap-2 pb-2">
+            <Activity className="w-5 h-5 text-emerald-500" />
+            <CardTitle className={settings.theme === 'dark' ? 'text-white' : ''}>
+              {t('dashboard.healthScore')}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center gap-6">
+              <div className={cn('w-20 h-20 rounded-full flex items-center justify-center text-2xl font-bold flex-shrink-0', healthBg)}>
+                <span className={healthColor}>{healthScore}</span>
+              </div>
+              <div className="flex-1 space-y-3">
+                {canSeeProfit && (
+                <div>
+                  <div className="flex justify-between text-sm mb-1">
+                    <span className={settings.theme === 'dark' ? 'text-gray-400' : 'text-gray-600'}>{t('dashboard.profitMargin')}</span>
+                    <span className="font-medium">{kpis.grossProfitMarginPercent.toFixed(1)}%</span>
+                  </div>
+                  <Progress value={Math.min(100, kpis.grossProfitMarginPercent * 3)} className="h-2" />
+                </div>
+                )}
+                <div>
+                  <div className="flex justify-between text-sm mb-1">
+                    <span className={settings.theme === 'dark' ? 'text-gray-400' : 'text-gray-600'}>{t('dashboard.stockHealth')}</span>
+                    <span className="font-medium">{Math.max(0, 100 - lowStockAlerts.length * 10)}%</span>
+                  </div>
+                  <Progress value={Math.max(0, 100 - lowStockAlerts.length * 10)} className="h-2" />
+                </div>
+                <div>
+                  <div className="flex justify-between text-sm mb-1">
+                    <span className={settings.theme === 'dark' ? 'text-gray-400' : 'text-gray-600'}>{t('dashboard.expiryRisk')}</span>
+                    <span className="font-medium text-red-500">{t('dashboard.critical', criticalExpiry)}</span>
+                  </div>
+                  <Progress value={Math.max(0, 100 - criticalExpiry * 15)} className="h-2" />
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Expiry Risk Dashboard */}
+        <Card className={cn(settings.theme === 'dark' && 'bg-gray-800 border-gray-700')}>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <div className="flex items-center gap-2">
+              <Flame className="w-5 h-5 text-red-500" />
+              <CardTitle className={settings.theme === 'dark' ? 'text-white' : ''}>
+                {t('dashboard.expiryRiskDashboard')}
+              </CardTitle>
+            </div>
+            <Badge variant="destructive">{t('dashboard.batchesAtRisk', expiryRiskReport.length)}</Badge>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {expiryRiskReport.length === 0 ? (
+                <p className="text-center text-gray-500 py-4">{t('dashboard.noExpiryRisk')}</p>
+              ) : (
+                expiryRiskReport.map((r) => (
+                  <div key={r.batchId} className={cn(
+                    'flex items-center justify-between rounded-lg px-3 py-2',
+                    settings.theme === 'dark' ? 'bg-gray-700' : 'bg-gray-50'
+                  )}>
+                    <div>
+                      <p className={cn('font-medium text-sm', settings.theme === 'dark' ? 'text-white' : 'text-gray-900')}>
+                        {r.medicineName}
+                      </p>
+                      <p className="text-xs text-gray-500">{t('dashboard.batch')}: {r.batchNumber} · {t('dashboard.qty')}: {r.quantity}</p>
+                    </div>
+                    <div className="text-right space-y-1">
+                      <div className="flex items-center gap-2">
+                        <Progress value={r.riskPercent} className="h-1.5 w-16" />
+                        <span className={cn(
+                          'text-xs font-medium',
+                          r.riskPercent >= 80 ? 'text-red-600' : r.riskPercent >= 50 ? 'text-amber-600' : 'text-blue-600'
+                        )}>
+                          {r.riskPercent}%
+                        </span>
+                      </div>
+                      <p className="text-xs text-gray-500">{r.daysUntilExpiry}d · Loss: Rs.{r.potentialLoss.toFixed(0)}</p>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+            <Button variant="ghost" className="w-full mt-3 gap-2" onClick={() => navigate('/alerts')}>
+              {t('dashboard.viewFullReport')} <ArrowRight className="w-4 h-4" />
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+      )}
+
+      {/* Charts Row — owner/manager only */}
+      {isOwnerOrManager && (
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Sales Chart */}
         <Card className={cn(
@@ -226,10 +414,10 @@ export function Dashboard() {
         )}>
           <CardHeader>
             <CardTitle className={settings.theme === 'dark' ? 'text-white' : ''}>
-              Weekly Sales Trend
+              {t('dashboard.weeklySalesTrend')}
             </CardTitle>
             <CardDescription>
-              Sales performance over the last 7 days
+              {t('dashboard.salesPerformance')}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -271,10 +459,10 @@ export function Dashboard() {
         )}>
           <CardHeader>
             <CardTitle className={settings.theme === 'dark' ? 'text-white' : ''}>
-              Sales by Category
+              {t('dashboard.salesByCategory')}
             </CardTitle>
             <CardDescription>
-              Distribution of sales across medicine categories
+              {t('dashboard.salesByCategoryDesc')}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -322,6 +510,7 @@ export function Dashboard() {
           </CardContent>
         </Card>
       </div>
+      )}
 
       {/* Alerts & Recent Activity */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -332,19 +521,19 @@ export function Dashboard() {
           <CardHeader className="flex flex-row items-center justify-between">
             <div>
               <CardTitle className={settings.theme === 'dark' ? 'text-white' : ''}>
-                Expiry Alerts
+                {t('dashboard.expiryAlertsTitle')}
               </CardTitle>
               <CardDescription>
-                Medicines nearing expiration
+                {t('dashboard.medicinesNearingExpiry')}
               </CardDescription>
             </div>
             <Badge variant="destructive">
-              {expiryAlerts.filter(a => !a.isResolved).length}
+              {expiryAlerts.length}
             </Badge>
           </CardHeader>
           <CardContent>
             <div className="space-y-3">
-              {expiryAlerts.filter(a => !a.isResolved).slice(0, 3).map((alert) => (
+              {expiryAlerts.slice(0, 3).map((alert) => (
                 <div 
                   key={alert.id} 
                   className={cn(
@@ -370,7 +559,7 @@ export function Dashboard() {
                         {alert.medicineName}
                       </p>
                       <p className="text-sm text-gray-500">
-                        Batch: {alert.batchNumber}
+                        {t('dashboard.batch')}: {alert.batchNumber}
                       </p>
                     </div>
                   </div>
@@ -379,15 +568,15 @@ export function Dashboard() {
                       'text-sm font-medium',
                       alert.daysUntilExpiry <= 30 ? 'text-red-600' : 'text-amber-600'
                     )}>
-                      {alert.daysUntilExpiry} days
+                      {t('dashboard.days', alert.daysUntilExpiry)}
                     </p>
-                    <p className="text-xs text-gray-500">until expiry</p>
+                    <p className="text-xs text-gray-500">{t('dashboard.untilExpiry')}</p>
                   </div>
                 </div>
               ))}
-              {expiryAlerts.filter(a => !a.isResolved).length === 0 && (
+              {expiryAlerts.length === 0 && (
                 <p className="text-center text-gray-500 py-4">
-                  No expiry alerts
+                  {t('dashboard.noExpiryAlerts')}
                 </p>
               )}
             </div>
@@ -396,7 +585,7 @@ export function Dashboard() {
               className="w-full mt-4 gap-2"
               onClick={() => navigate('/alerts')}
             >
-              View All Alerts
+              {t('dashboard.viewAllAlerts')}
               <ArrowRight className="w-4 h-4" />
             </Button>
           </CardContent>
@@ -409,19 +598,19 @@ export function Dashboard() {
           <CardHeader className="flex flex-row items-center justify-between">
             <div>
               <CardTitle className={settings.theme === 'dark' ? 'text-white' : ''}>
-                Low Stock Alerts
+                {t('dashboard.lowStockAlertsTitle')}
               </CardTitle>
               <CardDescription>
-                Items below reorder level
+                {t('dashboard.itemsBelowReorder')}
               </CardDescription>
             </div>
             <Badge variant="destructive">
-              {lowStockAlerts.filter(a => !a.isResolved).length}
+              {lowStockAlerts.length}
             </Badge>
           </CardHeader>
           <CardContent>
             <div className="space-y-3">
-              {lowStockAlerts.filter(a => !a.isResolved).slice(0, 3).map((alert) => (
+              {lowStockAlerts.slice(0, 3).map((alert) => (
                 <div 
                   key={alert.id} 
                   className={cn(
@@ -441,23 +630,23 @@ export function Dashboard() {
                         {alert.medicineName}
                       </p>
                       <p className="text-sm text-gray-500">
-                        Reorder level: {alert.reorderLevel}
+                        {t('dashboard.reorderLevel', alert.reorderLevel)}
                       </p>
                     </div>
                   </div>
                   <div className="text-right">
                     <p className="text-sm font-medium text-red-600">
-                      {alert.currentStock} left
+                      {t('dashboard.left', alert.currentStock)}
                     </p>
                     <p className="text-xs text-gray-500">
-                      Suggested: {alert.reorderQuantity}
+                      {t('dashboard.suggested', alert.reorderQuantity)}
                     </p>
                   </div>
                 </div>
               ))}
-              {lowStockAlerts.filter(a => !a.isResolved).length === 0 && (
+              {lowStockAlerts.length === 0 && (
                 <p className="text-center text-gray-500 py-4">
-                  No low stock alerts
+                  {t('dashboard.noLowStockAlerts')}
                 </p>
               )}
             </div>
@@ -466,7 +655,7 @@ export function Dashboard() {
               className="w-full mt-4 gap-2"
               onClick={() => navigate('/inventory')}
             >
-              View Inventory
+              {t('dashboard.viewInventory')}
               <ArrowRight className="w-4 h-4" />
             </Button>
           </CardContent>

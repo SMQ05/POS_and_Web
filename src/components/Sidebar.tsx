@@ -1,5 +1,6 @@
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore, useSettingsStore } from '@/store';
+import { useTranslation } from '@/hooks/useTranslation';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -25,6 +26,10 @@ import {
   AlertTriangle,
   Receipt,
   UserCog,
+  Wallet,
+  ClipboardList,
+  Shield,
+  Globe,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -33,37 +38,72 @@ interface SidebarProps {
 }
 
 const menuItems = [
-  { icon: LayoutDashboard, label: 'Dashboard', path: '/', module: 'dashboard' },
-  { icon: ShoppingCart, label: 'POS Billing', path: '/pos', module: 'pos' },
-  { icon: Receipt, label: 'Sales', path: '/sales', module: 'sales' },
-  { icon: Package, label: 'Inventory', path: '/inventory', module: 'inventory' },
-  { icon: Pill, label: 'Medicines', path: '/medicines', module: 'medicines' },
-  { icon: Truck, label: 'Suppliers', path: '/suppliers', module: 'suppliers' },
-  { icon: Users, label: 'Customers', path: '/customers', module: 'customers' },
-  { icon: AlertTriangle, label: 'Alerts', path: '/alerts', module: 'alerts' },
-  { icon: BarChart3, label: 'Reports', path: '/reports', module: 'reports' },
-  { icon: UserCog, label: 'Users', path: '/users', module: 'users' },
-  { icon: Settings, label: 'Settings', path: '/settings', module: 'settings' },
+  { icon: LayoutDashboard, labelKey: 'nav.dashboard', path: '/', module: 'dashboard', group: 'management' },
+  { icon: ShoppingCart, labelKey: 'nav.pos', path: '/pos', module: 'pos', group: 'pos' },
+  { icon: Receipt, labelKey: 'nav.sales', path: '/sales', module: 'sales', group: 'management' },
+  { icon: Package, labelKey: 'nav.inventory', path: '/inventory', module: 'inventory', group: 'management' },
+  { icon: Pill, labelKey: 'nav.medicines', path: '/medicines', module: 'medicines', group: 'management' },
+  { icon: Truck, labelKey: 'nav.suppliers', path: '/suppliers', module: 'suppliers', group: 'management' },
+  { icon: ClipboardList, labelKey: 'nav.purchaseOrders', path: '/purchase-orders', module: 'suppliers', group: 'management' },
+  { icon: Users, labelKey: 'nav.customers', path: '/customers', module: 'customers', group: 'management' },
+  { icon: AlertTriangle, labelKey: 'nav.alerts', path: '/alerts', module: 'alerts', group: 'management' },
+  { icon: BarChart3, labelKey: 'nav.reports', path: '/reports', module: 'reports', group: 'management' },
+  { icon: Wallet, labelKey: 'nav.expenses', path: '/expenses', module: 'expenses', group: 'management' },
+  { icon: UserCog, labelKey: 'nav.users', path: '/users', module: 'users', group: 'management' },
+  { icon: Settings, labelKey: 'nav.settings', path: '/settings', module: 'settings', group: 'management' },
 ];
 
 export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const navigate = useNavigate();
   const location = useLocation();
-  const { logout, hasPermission } = useAuthStore();
+  const { logout, hasPermission, currentUser } = useAuthStore();
   const { settings } = useSettingsStore();
+  const { t, isRTL } = useTranslation();
 
   const handleLogout = () => {
     logout();
     navigate('/login');
   };
 
-  const filteredMenuItems = menuItems.filter(item => 
-    hasPermission(item.module, 'read') || item.module === 'dashboard'
-  );
+  const isSuperAdmin = currentUser?.role === 'superadmin';
+
+  const filteredMenuItems = menuItems.filter(item => {
+    // Permission check
+    if (!(hasPermission(item.module, 'read') || item.module === 'dashboard')) return false;
+    // Module toggle check
+    if (item.group === 'pos' && !settings.posEnabled && !isSuperAdmin) return false;
+    if (item.group === 'management' && !settings.managementEnabled && !isSuperAdmin) {
+      // Always show dashboard
+      if (item.path === '/') return true;
+      return false;
+    }
+    return true;
+  });
+
+  // Add super admin item at top if superadmin or owner
+  const superAdminItem = (isSuperAdmin || currentUser?.role === 'owner') ? [{
+    icon: Shield,
+    labelKey: 'nav.superAdmin',
+    path: '/super-admin',
+    module: 'superadmin',
+    group: 'superadmin',
+  }] : [];
+
+  // Add web store link if enabled
+  const webStoreItem = settings.webStoreEnabled ? [{
+    icon: Globe,
+    labelKey: 'nav.webStore',
+    path: '/store',
+    module: 'webstore',
+    group: 'web',
+  }] : [];
+
+  const allMenuItems = [...superAdminItem, ...filteredMenuItems, ...webStoreItem];
 
   return (
     <div className={cn(
-      'fixed left-0 top-0 z-40 h-screen transition-all duration-300 border-r',
+      'fixed top-0 z-40 h-screen transition-all duration-300 border-r',
+      isRTL ? 'right-0 border-l border-r-0' : 'left-0',
       collapsed ? 'w-20' : 'w-64',
       settings.theme === 'dark' 
         ? 'bg-gray-900 border-gray-800' 
@@ -80,8 +120,8 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
               <Pill className="w-5 h-5 text-white" />
             </div>
             <div>
-              <h1 className="font-bold text-lg text-emerald-600">PharmaPOS</h1>
-              {!collapsed && <p className="text-xs text-gray-500">Pakistan</p>}
+              <h1 className="font-bold text-lg text-emerald-600">{t('common.brand')}</h1>
+              {!collapsed && <p className="text-xs text-gray-500">{t('common.brandCountry')}</p>}
             </div>
           </div>
         )}
@@ -97,7 +137,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
             onClick={onToggle}
             className="h-8 w-8"
           >
-            <ChevronLeft className="h-4 w-4" />
+            {isRTL ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
           </Button>
         )}
         {collapsed && (
@@ -105,9 +145,12 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
             variant="ghost"
             size="icon"
             onClick={onToggle}
-            className="h-8 w-8 absolute -right-4 top-5 bg-white border shadow-sm"
+            className={cn(
+              'h-8 w-8 absolute top-5 bg-white border shadow-sm',
+              isRTL ? '-left-4' : '-right-4'
+            )}
           >
-            <ChevronRight className="h-4 w-4" />
+            {isRTL ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
           </Button>
         )}
       </div>
@@ -116,7 +159,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
       <ScrollArea className="h-[calc(100vh-8rem)]">
         <TooltipProvider delayDuration={0}>
           <nav className="p-2 space-y-1">
-            {filteredMenuItems.map((item) => {
+            {allMenuItems.map((item) => {
               const isActive = location.pathname === item.path;
               const Icon = item.icon;
 
@@ -136,12 +179,12 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
                       )}
                     >
                       <Icon className={cn('w-5 h-5', collapsed && 'w-6 h-6')} />
-                      {!collapsed && <span className="font-medium">{item.label}</span>}
+                      {!collapsed && <span className="font-medium">{t(item.labelKey)}</span>}
                     </button>
                   </TooltipTrigger>
                   {collapsed && (
-                    <TooltipContent side="right" className="font-medium">
-                      {item.label}
+                    <TooltipContent side={isRTL ? 'left' : 'right'} className="font-medium">
+                      {t(item.labelKey)}
                     </TooltipContent>
                   )}
                 </Tooltip>
@@ -170,12 +213,12 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
                 )}
               >
                 <LogOut className="w-5 h-5" />
-                {!collapsed && <span className="font-medium">Logout</span>}
+                {!collapsed && <span className="font-medium">{t('common.logout')}</span>}
               </button>
             </TooltipTrigger>
             {collapsed && (
-              <TooltipContent side="right" className="font-medium">
-                Logout
+              <TooltipContent side={isRTL ? 'left' : 'right'} className="font-medium">
+                {t('common.logout')}
               </TooltipContent>
             )}
           </Tooltip>

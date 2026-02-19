@@ -9,6 +9,9 @@ import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
+import { exportToCSV, importFromCSV } from '@/lib/csv';
+import { ImportHelpPopover } from '@/components/ImportHelpPopover';
+import { toast } from 'sonner';
 import {
   Table,
   TableBody,
@@ -49,6 +52,7 @@ import {
   X,
   AlertCircle,
 } from 'lucide-react';
+import { useTranslation } from '@/hooks/useTranslation';
 import type { Medicine, MedicineCategory, DosageForm } from '@/types';
 
 const categories: { value: MedicineCategory; label: string }[] = [
@@ -89,6 +93,7 @@ const dosageForms: { value: DosageForm; label: string }[] = [
 export function Medicines() {
   const [searchParams] = useSearchParams();
   const { settings } = useSettingsStore();
+  const { t, isRTL } = useTranslation();
   const { medicines, addMedicine, updateMedicine, deleteMedicine, searchMedicines } = useInventoryStore();
   
   const [searchQuery, setSearchQuery] = useState('');
@@ -97,6 +102,61 @@ export function Medicines() {
   const [showEditDialog, setShowEditDialog] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [selectedMedicine, setSelectedMedicine] = useState<Medicine | null>(null);
+
+  // ── CSV column definition ──
+  const csvColumns = [
+    { key: 'name' as const, label: 'Name' },
+    { key: 'genericName' as const, label: 'Generic Name' },
+    { key: 'brandName' as const, label: 'Brand' },
+    { key: 'category' as const, label: 'Category' },
+    { key: 'dosageForm' as const, label: 'Dosage Form' },
+    { key: 'strength' as const, label: 'Strength' },
+    { key: 'unit' as const, label: 'Unit' },
+    { key: 'barcode' as const, label: 'Barcode' },
+    { key: 'classification' as const, label: 'Classification' },
+    { key: 'reorderLevel' as const, label: 'Reorder Level' },
+    { key: 'reorderQuantity' as const, label: 'Reorder Quantity' },
+  ];
+
+  const handleExportMedicines = () => {
+    const data = medicines.filter(m => m.isActive);
+    if (data.length === 0) { toast.error(t('medicines.noExport')); return; }
+    exportToCSV(data, csvColumns, 'medicines');
+    toast.success(t('medicines.exported', data.length));
+  };
+
+  const handleImportMedicines = () => {
+    importFromCSV<Record<string, string>>(
+      (rows) => {
+        let imported = 0;
+        rows.forEach((row) => {
+          if (!row['Name']) return;
+          const med: Medicine = {
+            id: Date.now().toString() + Math.random().toString(36).slice(2, 7),
+            name: row['Name'] || '',
+            genericName: row['Generic Name'] || '',
+            brandName: row['Brand'] || '',
+            category: (row['Category'] || 'tablets') as MedicineCategory,
+            dosageForm: (row['Dosage Form'] || 'tablet') as DosageForm,
+            strength: row['Strength'] || '',
+            unit: row['Unit'] || 'tablet',
+            barcode: row['Barcode'] || undefined,
+            classification: (row['Classification'] || 'otc') as 'otc' | 'prescription' | 'controlled',
+            isPrescriptionRequired: (row['Classification'] || '').toLowerCase() === 'prescription',
+            isActive: true,
+            reorderLevel: parseInt(row['Reorder Level'] || '50', 10),
+            reorderQuantity: parseInt(row['Reorder Quantity'] || '100', 10),
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          };
+          addMedicine(med);
+          imported++;
+        });
+        toast.success(t('medicines.imported', imported));
+      },
+      (err) => toast.error(err),
+    );
+  };
   
   const [formData, setFormData] = useState<Partial<Medicine>>({
     name: '',
@@ -213,22 +273,22 @@ export function Medicines() {
     setShowDeleteDialog(true);
   };
 
-  // Medicine Form Component
-  const MedicineForm = () => (
+  // Medicine Form Content (plain JSX, not a component — avoids remount/focus-loss)
+  const medicineFormContent = (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
-          <Label>Medicine Name *</Label>
+          <Label>{t('medicines.medicineName')}</Label>
           <Input
-            placeholder="e.g., Panadol"
+            placeholder={t('medicines.namePlaceholder')}
             value={formData.name}
             onChange={(e) => setFormData({ ...formData, name: e.target.value })}
           />
         </div>
         <div className="space-y-2">
-          <Label>Generic Name *</Label>
+          <Label>{t('medicines.genericName')}</Label>
           <Input
-            placeholder="e.g., Paracetamol"
+            placeholder={t('medicines.genericPlaceholder')}
             value={formData.genericName}
             onChange={(e) => setFormData({ ...formData, genericName: e.target.value })}
           />
@@ -237,17 +297,17 @@ export function Medicines() {
 
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
-          <Label>Brand Name</Label>
+          <Label>{t('medicines.brandName')}</Label>
           <Input
-            placeholder="e.g., GSK"
+            placeholder={t('medicines.brandPlaceholder')}
             value={formData.brandName}
             onChange={(e) => setFormData({ ...formData, brandName: e.target.value })}
           />
         </div>
         <div className="space-y-2">
-          <Label>Barcode</Label>
+          <Label>{t('medicines.barcode')}</Label>
           <Input
-            placeholder="Scan or enter barcode"
+            placeholder={t('medicines.barcodePlaceholder')}
             value={formData.barcode}
             onChange={(e) => setFormData({ ...formData, barcode: e.target.value })}
           />
@@ -256,7 +316,7 @@ export function Medicines() {
 
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
-          <Label>Category *</Label>
+          <Label>{t('medicines.categoryLabel')}</Label>
           <Select
             value={formData.category}
             onValueChange={(value) => setFormData({ ...formData, category: value as MedicineCategory })}
@@ -272,7 +332,7 @@ export function Medicines() {
           </Select>
         </div>
         <div className="space-y-2">
-          <Label>Dosage Form *</Label>
+          <Label>{t('medicines.dosageForm')}</Label>
           <Select
             value={formData.dosageForm}
             onValueChange={(value) => setFormData({ ...formData, dosageForm: value as DosageForm })}
@@ -291,17 +351,17 @@ export function Medicines() {
 
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
-          <Label>Strength</Label>
+          <Label>{t('medicines.strength')}</Label>
           <Input
-            placeholder="e.g., 500mg"
+            placeholder={t('medicines.strengthPlaceholder')}
             value={formData.strength}
             onChange={(e) => setFormData({ ...formData, strength: e.target.value })}
           />
         </div>
         <div className="space-y-2">
-          <Label>Unit</Label>
+          <Label>{t('medicines.unit')}</Label>
           <Input
-            placeholder="e.g., tablet, bottle"
+            placeholder={t('medicines.unitPlaceholder')}
             value={formData.unit}
             onChange={(e) => setFormData({ ...formData, unit: e.target.value })}
           />
@@ -310,7 +370,7 @@ export function Medicines() {
 
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
-          <Label>Reorder Level</Label>
+          <Label>{t('medicines.reorderLevel')}</Label>
           <Input
             type="number"
             value={formData.reorderLevel}
@@ -318,7 +378,7 @@ export function Medicines() {
           />
         </div>
         <div className="space-y-2">
-          <Label>Reorder Quantity</Label>
+          <Label>{t('medicines.reorderQty')}</Label>
           <Input
             type="number"
             value={formData.reorderQuantity}
@@ -328,9 +388,9 @@ export function Medicines() {
       </div>
 
       <div className="space-y-2">
-        <Label>Description</Label>
+        <Label>{t('common.description')}</Label>
         <Textarea
-          placeholder="Enter medicine description..."
+          placeholder={t('medicines.descPlaceholder')}
           value={formData.description}
           onChange={(e) => setFormData({ ...formData, description: e.target.value })}
         />
@@ -344,7 +404,7 @@ export function Medicines() {
             setFormData({ ...formData, isPrescriptionRequired: checked as boolean })
           }
         />
-        <Label htmlFor="prescription">Prescription Required</Label>
+        <Label htmlFor="prescription">{t('medicines.prescriptionRequired')}</Label>
       </div>
     </div>
   );
@@ -358,30 +418,33 @@ export function Medicines() {
             'text-2xl font-bold',
             settings.theme === 'dark' ? 'text-white' : 'text-gray-900'
           )}>
-            Medicines
+            {t('medicines.title')}
           </h1>
           <p className={cn(
             'text-sm',
             settings.theme === 'dark' ? 'text-gray-400' : 'text-gray-600'
           )}>
-            Manage your medicine database
+            {t('medicines.subtitle')}
           </p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" className="gap-2">
-            <Upload className="w-4 h-4" />
-            Import
-          </Button>
-          <Button variant="outline" className="gap-2">
+        <div className="flex gap-2 items-center">
+          <div className="flex items-center">
+            <Button variant="outline" className="gap-2" onClick={handleImportMedicines}>
+              <Upload className="w-4 h-4" />
+              {t('common.import')}
+            </Button>
+            <ImportHelpPopover columns={csvColumns} templateFilename="medicines" entityName="Medicines" />
+          </div>
+          <Button variant="outline" className="gap-2" onClick={handleExportMedicines}>
             <Download className="w-4 h-4" />
-            Export
+            {t('common.export')}
           </Button>
           <Button 
             className="gap-2 bg-emerald-500 hover:bg-emerald-600"
             onClick={() => setShowAddDialog(true)}
           >
             <Plus className="w-4 h-4" />
-            Add Medicine
+            {t('medicines.addMedicine')}
           </Button>
         </div>
       </div>
@@ -393,7 +456,7 @@ export function Medicines() {
             <div className="flex-1 relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
               <Input
-                placeholder="Search medicines..."
+                placeholder={t('medicines.searchPlaceholder')}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="pl-10"
@@ -405,7 +468,7 @@ export function Medicines() {
                 <SelectValue placeholder="Category" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Categories</SelectItem>
+                <SelectItem value="all">{t('medicines.allCategories')}</SelectItem>
                 {categories.map(cat => (
                   <SelectItem key={cat.value} value={cat.value}>{cat.label}</SelectItem>
                 ))}
@@ -421,7 +484,7 @@ export function Medicines() {
       )}>
         <CardHeader>
           <CardTitle className={settings.theme === 'dark' ? 'text-white' : ''}>
-            Medicine List ({filteredMedicines.length})
+            {t('medicines.medicineList')} ({filteredMedicines.length})
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
@@ -429,13 +492,13 @@ export function Medicines() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Generic</TableHead>
-                  <TableHead>Category</TableHead>
-                  <TableHead>Strength</TableHead>
-                  <TableHead>Type</TableHead>
-                  <TableHead>Barcode</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
+                  <TableHead>{t('common.name')}</TableHead>
+                  <TableHead>{t('medicines.generic')}</TableHead>
+                  <TableHead>{t('common.category')}</TableHead>
+                  <TableHead>{t('medicines.strength')}</TableHead>
+                  <TableHead>{t('common.type')}</TableHead>
+                  <TableHead>{t('medicines.barcode')}</TableHead>
+                  <TableHead className="text-right">{t('common.actions')}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -502,17 +565,17 @@ export function Medicines() {
       <Dialog open={showAddDialog} onOpenChange={setShowAddDialog}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Add New Medicine</DialogTitle>
+            <DialogTitle>{t('medicines.addNew')}</DialogTitle>
             <DialogDescription>
-              Enter medicine details below
+              {t('medicines.addNewDesc')}
             </DialogDescription>
           </DialogHeader>
           
-          <MedicineForm />
+          {medicineFormContent}
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowAddDialog(false)}>
-              Cancel
+              {t('common.cancel')}
             </Button>
             <Button 
               className="bg-emerald-500 hover:bg-emerald-600"
@@ -520,7 +583,7 @@ export function Medicines() {
               disabled={!formData.name || !formData.genericName}
             >
               <Save className="w-4 h-4 mr-2" />
-              Save Medicine
+              {t('medicines.saveMedicine')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -530,24 +593,24 @@ export function Medicines() {
       <Dialog open={showEditDialog} onOpenChange={setShowEditDialog}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Edit Medicine</DialogTitle>
+            <DialogTitle>{t('medicines.editTitle')}</DialogTitle>
             <DialogDescription>
-              Update medicine details
+              {t('medicines.editDesc')}
             </DialogDescription>
           </DialogHeader>
           
-          <MedicineForm />
+          {medicineFormContent}
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowEditDialog(false)}>
-              Cancel
+              {t('common.cancel')}
             </Button>
             <Button 
               className="bg-emerald-500 hover:bg-emerald-600"
               onClick={handleEdit}
             >
               <Save className="w-4 h-4 mr-2" />
-              Update Medicine
+              {t('medicines.updateMedicine')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -559,21 +622,20 @@ export function Medicines() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-red-600">
               <AlertCircle className="w-5 h-5" />
-              Delete Medicine
+              {t('medicines.deleteTitle')}
             </DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete <strong>{selectedMedicine?.name}</strong>?
-              This action cannot be undone.
+              {t('medicines.deleteConfirm', selectedMedicine?.name ?? '')}
             </DialogDescription>
           </DialogHeader>
           
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowDeleteDialog(false)}>
-              Cancel
+              {t('common.cancel')}
             </Button>
             <Button variant="destructive" onClick={handleDelete}>
               <Trash2 className="w-4 h-4 mr-2" />
-              Delete
+              {t('common.delete')}
             </Button>
           </DialogFooter>
         </DialogContent>
