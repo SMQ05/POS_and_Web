@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom';
 import { useAuthStore, useSettingsStore, useDashboardStore, useInventoryStore } from '@/store';
 import { useTranslation } from '@/hooks/useTranslation';
 import { cn } from '@/lib/utils';
@@ -24,7 +25,8 @@ import {
 } from 'lucide-react';
 
 export function Header() {
-  const { currentUser } = useAuthStore();
+  const navigate = useNavigate();
+  const { currentUser, logout } = useAuthStore();
   const { settings, toggleTheme, setLanguage } = useSettingsStore();
   const { dismissedExpiryAlertIds, dismissedLowStockAlertIds } = useDashboardStore();
   const { getLiveExpiryAlerts, getLiveLowStockAlerts } = useInventoryStore();
@@ -125,7 +127,7 @@ export function Header() {
             ) : (
               <>
                 {getLiveExpiryAlerts().filter(a => !dismissedExpiryAlertIds.includes(a.id)).slice(0, 5).map(alert => (
-                  <DropdownMenuItem key={alert.id} className="flex items-start gap-2 p-3">
+                  <DropdownMenuItem key={alert.id} className="flex items-start gap-2 p-3 cursor-pointer" onClick={() => navigate('/alerts')}>
                     <AlertTriangle className="w-4 h-4 text-amber-500 mt-0.5" />
                     <div className="flex-1">
                       <p className="text-sm font-medium">{alert.medicineName}</p>
@@ -136,7 +138,7 @@ export function Header() {
                   </DropdownMenuItem>
                 ))}
                 {getLiveLowStockAlerts().filter(a => !dismissedLowStockAlertIds.includes(a.id)).slice(0, 5).map(alert => (
-                  <DropdownMenuItem key={alert.id} className="flex items-start gap-2 p-3">
+                  <DropdownMenuItem key={alert.id} className="flex items-start gap-2 p-3 cursor-pointer" onClick={() => navigate('/alerts')}>
                     <AlertTriangle className="w-4 h-4 text-red-500 mt-0.5" />
                     <div className="flex-1">
                       <p className="text-sm font-medium">{alert.medicineName}</p>
@@ -146,6 +148,10 @@ export function Header() {
                     </div>
                   </DropdownMenuItem>
                 ))}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem className="justify-center text-emerald-600 font-medium cursor-pointer" onClick={() => navigate('/alerts')}>
+                  {t('common.viewAll') || 'View All Alerts'}
+                </DropdownMenuItem>
               </>
             )}
           </DropdownMenuContent>
@@ -173,10 +179,10 @@ export function Header() {
           <DropdownMenuContent align={isRTL ? 'start' : 'end'}>
             <DropdownMenuLabel>{t('common.myAccount')}</DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuItem>{t('common.profile')}</DropdownMenuItem>
-            <DropdownMenuItem>{t('common.changePassword')}</DropdownMenuItem>
+            <DropdownMenuItem className="cursor-pointer" onClick={() => navigate('/settings')}>{t('common.profile')}</DropdownMenuItem>
+            <DropdownMenuItem className="cursor-pointer" onClick={() => navigate('/settings')}>{t('common.changePassword')}</DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem className="text-red-600">
+            <DropdownMenuItem className="text-red-600 cursor-pointer" onClick={() => { logout(); navigate('/login'); }}>
               {t('common.logout')}
             </DropdownMenuItem>
           </DropdownMenuContent>
