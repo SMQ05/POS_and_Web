@@ -1,167 +1,88 @@
-# PharmaPOS — Pharmacy POS & Management System
+# PharmaPOS SaaS
 
-A full-featured pharmacy point-of-sale and inventory management system built with **React 18 + TypeScript + Vite + Zustand + TailwindCSS**.
+Multi-tenant pharmacy POS, inventory, reporting, and web-store application.
 
----
+## Local Development
 
-## Quick Start (Local Development)
+Prerequisites:
 
-### Prerequisites
+- Node.js 20.19+ or 24+
+- npm
+- MySQL 8.x, either installed locally or running through Docker
 
-| Tool | Minimum Version |
-|------|----------------|
-| Node.js | 18.x or higher |
-| npm | 9.x or higher (comes with Node) |
+Copy environment defaults:
 
-> Download Node.js from [nodejs.org](https://nodejs.org/) if not installed.
+```bash
+cp .env.example .env
+```
 
-### 1 — Install dependencies
-
-Open a terminal in the `app/` folder and run:
+Install dependencies:
 
 ```bash
 npm install
 ```
 
-### 2 — Start the development server
+If Docker is available, start local MySQL first:
+
+```bash
+docker compose up -d mysql
+```
+
+The local database URL is:
+
+```env
+DATABASE_URL="mysql://pharmapos:pharmapos_password@127.0.0.1:3306/pharmapos_saas"
+```
+
+Then run:
+
+```bash
+npm run db:generate
+npm run db:push
+npm run db:seed
+```
+
+Start the API:
+
+```bash
+npm run api:dev
+```
+
+Start the frontend in another terminal:
 
 ```bash
 npm run dev
 ```
 
-The app will start at **http://localhost:5173**
+Frontend: `http://127.0.0.1:5173`  
+API health check: `http://127.0.0.1:4000/health`
 
-> Hot Module Replacement (HMR) is enabled — changes to source files reflect instantly without a full reload.
+## Demo Tenant
 
-### 3 — Open in browser
+The seed command creates one tenant:
 
-Navigate to: **http://localhost:5173**
+- Tenant slug: `demo-pharmacy`
+- Owner: `owner@pharmapos.pk`
+- Manager: `manager@pharmapos.pk`
+- Cashier: `cashier@pharmapos.pk`
+- Super admin: `superadmin@pharmapos.pk`
+- Password: `ChangeMe123!`
 
-You will be redirected to the Login page automatically.
+This password is only for local seeded data. Use a strong unique secret for real tenants.
 
----
+## SaaS Notes
 
-## Demo Account Credentials
+- All production data models are tenant-scoped with `tenantId`.
+- Frontend login uses the tenant slug from `VITE_TENANT_SLUG`.
+- Auth is API-backed with bcrypt password hashes and JWT sessions.
+- Core app data loads through `/api/bootstrap`.
+- New tenants can be created through `POST /api/tenants`.
 
-All passwords are `password` (any string is accepted — see note below).
+## Important Production Work Still Required
 
-| Role | Email | Password | Access Level |
-|------|-------|----------|-------------|
-| **Owner** | `owner@pharmapos.pk` | `password` | Full access — all modules, settings, reports, users |
-| **Manager** | `manager@pharmapos.pk` | `password` | POS, Inventory, Reports (no Settings / Users) |
-| **Cashier** | `cashier@pharmapos.pk` | `password` | POS and Sales history only |
-
-> **Note:** The login currently accepts _any_ password as long as the email matches one of the above. This is mock authentication — no backend required. In production, replace the `login()` function in `src/store/index.ts` with a real API call.
-
-### One-click login buttons
-
-On the Login page there are three **Quick Login** buttons (Owner / Manager / Cashier) that auto-fill the credentials — just click the button then click **Sign In**.
-
----
-
-## Other Useful Scripts
-
-| Command | Description |
-|---------|-------------|
-| `npm run dev` | Start local dev server with HMR |
-| `npm run build` | TypeScript compile + production Vite build (outputs to `dist/`) |
-| `npm run preview` | Preview the production build locally |
-| `npm run lint` | Run ESLint on all source files |
-
----
-
-## Environment Variables (optional)
-
-Create a `.env` file in the `app/` folder to override defaults:
-
-```env
-# Set to false to switch from mock data to a real backend API
-VITE_USE_MOCK=true
-
-# Backend API base URL (only used when VITE_USE_MOCK=false)
-VITE_API_URL=http://localhost:8000/api
-```
-
-Default behaviour (no `.env` file needed) is to run fully on mock data with no backend.
-
----
-
-## Project Structure
-
-```
-src/
-├── components/        # Layout, Header, Sidebar + shadcn/ui components
-├── data/              # mockData.ts — seed data (medicines, batches, sales, etc.)
-├── hooks/             # use-mobile.ts
-├── lib/               # utils.ts, api.ts (API abstraction layer)
-├── pages/             # Dashboard, POS, Inventory, Reports, Alerts, ...
-├── store/             # index.ts — all Zustand stores
-└── types/             # index.ts — all TypeScript interfaces
-```
-
----
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
-
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
-
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+- Use managed MySQL in production with backups, point-in-time recovery, private networking, and TLS.
+- Add migrations and CI checks for every schema change.
+- Finish replacing every frontend write path with API writes.
+- Add server-side authorization checks per business operation.
+- Add payment gateway integrations for JazzCash/EasyPaisa/card flows.
+- Add automated tests for auth, tenant isolation, POS checkout, stock mutation, and order processing.

@@ -72,13 +72,13 @@ export function SuperAdminLogin() {
             'text-3xl font-bold',
             settings.theme === 'dark' ? 'text-white' : 'text-gray-900'
           )}>
-            Super Admin
+            SaaS Admin
           </h1>
           <p className={cn(
             'mt-2 text-sm',
             settings.theme === 'dark' ? 'text-gray-400' : 'text-gray-600'
           )}>
-            Software Platform Control Panel
+            Multi-tenant Platform Control Panel
           </p>
         </div>
 
@@ -89,7 +89,7 @@ export function SuperAdminLogin() {
           <CardHeader className="space-y-1">
             <CardTitle className="text-xl text-center">Platform Access</CardTitle>
             <CardDescription className="text-center">
-              Enter your Super Admin credentials to continue
+              Enter your SaaS platform admin credentials to continue
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -107,7 +107,7 @@ export function SuperAdminLogin() {
                   <Input
                     id="sa-email"
                     type="email"
-                    placeholder="superadmin@pharmapos.pk"
+                    placeholder="qasim@kynexsolutions.com"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     className={cn(
@@ -161,7 +161,7 @@ export function SuperAdminLogin() {
                 variant="outline"
                 size="sm"
                 className="w-full text-xs"
-                onClick={() => { setEmail('superadmin@pharmapos.pk'); setPassword('password'); }}
+                onClick={() => { setEmail('qasim@kynexsolutions.com'); setPassword('ChangeMe123!'); }}
               >
                 Quick Fill (Dev)
               </Button>

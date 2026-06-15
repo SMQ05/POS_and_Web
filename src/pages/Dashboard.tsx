@@ -36,45 +36,33 @@ import {
   Cell,
 } from 'recharts';
 
-const salesData = [
-  { name: 'Mon', sales: 45000 },
-  { name: 'Tue', sales: 52000 },
-  { name: 'Wed', sales: 48000 },
-  { name: 'Thu', sales: 61000 },
-  { name: 'Fri', sales: 55000 },
-  { name: 'Sat', sales: 67000 },
-  { name: 'Sun', sales: 42000 },
-];
-
-const categoryData = [
-  { name: 'Tablets', value: 35 },
-  { name: 'Syrups', value: 25 },
-  { name: 'Injections', value: 15 },
-  { name: 'Creams', value: 10 },
-  { name: 'Others', value: 15 },
-];
-
 const COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6'];
+const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 export function Dashboard() {
   const navigate = useNavigate();
   const { settings } = useSettingsStore();
   const { dismissedExpiryAlertIds, dismissedLowStockAlertIds } = useDashboardStore();
-  const { getTodaySales, getTodayProfit, getTotalProfit, computeKPIs } = useSalesStore();
+  const { sales, getTodaySales, getTodayProfit, getTotalProfit, computeKPIs } = useSalesStore();
   const { medicines, batches, getExpiryRiskReport, getLiveExpiryAlerts, getLiveLowStockAlerts } = useInventoryStore();
   const { suppliers } = useSupplierStore();
-  const { currentUser } = useAuthStore();
+  const { currentUser, activeBranchId } = useAuthStore();
   const { t, isRTL } = useTranslation();
 
   const role = currentUser?.role ?? 'cashier';
   const isOwnerOrManager = role === 'owner' || role === 'manager';
   const canSeeProfit = role === 'owner' || (role === 'manager' && settings.managerCanSeeProfit);
 
+  // Stock value / batch counts + the sales charts are per-branch (the store's
+  // sales selectors already filter; these raw-array loops need it explicitly).
+  const branchBatches = activeBranchId ? batches.filter((b) => b.branchId === activeBranchId) : batches;
+  const branchSales = activeBranchId ? sales.filter((s) => s.branchId === activeBranchId) : sales;
+
   const todaySales = getTodaySales();
   const todayRevenue = todaySales.reduce((sum, s) => sum + s.totalAmount, 0);
   const todayProfit = getTodayProfit();
   const totalProfit = getTotalProfit();
-  const kpis = computeKPIs(batches);
+  const kpis = computeKPIs(branchBatches);
   const expiryRiskReport = getExpiryRiskReport().slice(0, 5);
 
   // Live computed alerts
@@ -93,6 +81,44 @@ export function Dashboard() {
   ));
   const healthColor = healthScore >= 70 ? 'text-emerald-500' : healthScore >= 40 ? 'text-amber-500' : 'text-red-500';
   const healthBg = healthScore >= 70 ? 'bg-emerald-100' : healthScore >= 40 ? 'bg-amber-100' : 'bg-red-100';
+
+  // Weekly Sales Trend — last 7 days from real sales
+  const salesData = (() => {
+    const buckets = new Map<string, number>();
+    const today = new Date();
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(today.getDate() - i);
+      const key = d.toISOString().slice(0, 10);
+      buckets.set(key, 0);
+    }
+    for (const s of branchSales) {
+      const key = new Date(s.saleDate).toISOString().slice(0, 10);
+      if (buckets.has(key)) buckets.set(key, (buckets.get(key) ?? 0) + s.totalAmount);
+    }
+    return Array.from(buckets.entries()).map(([key, total]) => ({
+      name: DAY_NAMES[new Date(key).getDay()],
+      sales: total,
+    }));
+  })();
+
+  // Sales by Category — sum sale items grouped by medicine category
+  const categoryData = (() => {
+    const totals = new Map<string, number>();
+    for (const s of branchSales) {
+      for (const it of s.items as Array<{ medicineId: string; total?: number; quantity?: number; unitPrice?: number }>) {
+        const med = medicines.find((m) => m.id === it.medicineId);
+        const cat = med?.category ?? 'Other';
+        const value = it.total ?? (it.quantity ?? 0) * (it.unitPrice ?? 0);
+        totals.set(cat, (totals.get(cat) ?? 0) + value);
+      }
+    }
+    const sum = Array.from(totals.values()).reduce((a, b) => a + b, 0);
+    if (sum === 0) return [{ name: t('dashboard.noData') || 'No data', value: 1 }];
+    return Array.from(totals.entries())
+      .map(([name, total]) => ({ name, value: Math.round((total / sum) * 100) }))
+      .sort((a, b) => b.value - a.value);
+  })();
 
   // ─── Stat cards: cashier sees only sales/stock-relevant cards ───
   const allStatCards = [
@@ -119,7 +145,7 @@ export function Dashboard() {
     {
       title: t('dashboard.totalMedicines'),
       value: medicines.length.toString(),
-      change: t('dashboard.activeBatches', batches.filter(b => b.isActive && b.quantity > 0).length),
+      change: t('dashboard.activeBatches', branchBatches.filter(b => b.isActive && b.quantity > 0).length),
       trend: 'up',
       icon: Package,
       color: 'blue',
@@ -222,6 +248,37 @@ export function Dashboard() {
           </Badge>
         </div>
       </div>
+
+      {/* M3 — Today's expected distributors (settings-gated). Picks any
+          supplier whose visitDays array includes today's weekday. Useful for
+          the buyer to plan PO calls in the morning. */}
+      {settings.supplierVisitDaysEnabled && (() => {
+        const todayKey = (['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const)[new Date().getDay()];
+        const expected = suppliers.filter((s) => s.isActive && Array.isArray(s.visitDays) && s.visitDays.includes(todayKey));
+        if (expected.length === 0) return null;
+        return (
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Truck className="w-4 h-4 text-purple-600" />
+                Today&apos;s expected suppliers ({expected.length})
+              </CardTitle>
+              <CardDescription className="text-xs">Distributors scheduled to visit on {todayKey.toUpperCase()}.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex flex-wrap gap-2">
+                {expected.map((s) => (
+                  <span key={s.id} className="inline-flex items-center gap-2 text-xs bg-purple-50 border border-purple-200 text-purple-800 px-3 py-1.5 rounded-md">
+                    <Truck className="w-3 h-3" />
+                    <span className="font-medium">{s.name}</span>
+                    <span className="text-purple-600">· {s.phone}</span>
+                  </span>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        );
+      })()}
 
       {/* Quick Actions */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

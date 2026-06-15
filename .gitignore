@@ -1,4 +1,17 @@
 node_modules
 dist
+dist-server
 .env
 .env.local
+
+# Environment files containing real secrets — never commit
+.env.hostinger
+.env.prod-backup
+.env.production
+.env.*-backup-*
+
+# Local Claude Code config and installed skills
+.claude/
+
+# Deploy artifacts
+*.zip

@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
-import { exportToCSV, importFromCSV } from '@/lib/csv';
+import { importFromCSV } from '@/lib/csv';
 import { ImportHelpPopover } from '@/components/ImportHelpPopover';
 import { toast } from 'sonner';
 import {
@@ -42,7 +42,6 @@ import {
   AlertCircle,
   TrendingUp,
   Star,
-  Download,
   Upload,
   FileText,
   Pill,
@@ -50,6 +49,7 @@ import {
 } from 'lucide-react';
 import { useTranslation } from '@/hooks/useTranslation';
 import type { Customer } from '@/types';
+import { openDataUrlInNewTab } from '@/lib/openImage';
 
 export function Customers() {
   const { settings } = useSettingsStore();
@@ -72,17 +72,6 @@ export function Customers() {
     { key: 'cnic' as const, label: 'CNIC' },
     { key: 'address' as const, label: 'Address' },
   ];
-
-  const handleExportCustomers = () => {
-    const data = customers.filter(c => c.isActive);
-    if (data.length === 0) { toast.error('No customers to export'); return; }
-    exportToCSV(data, [
-      ...csvColumns,
-      { key: 'totalPurchases' as const, label: 'Total Purchases' },
-      { key: 'loyaltyPoints' as const, label: 'Loyalty Points' },
-    ], 'customers');
-    toast.success(`Exported ${data.length} customers`);
-  };
 
   const handleImportCustomers = () => {
     importFromCSV<Record<string, string>>(
@@ -144,6 +133,8 @@ export function Customers() {
       dateOfBirth: formData.dateOfBirth,
       allergies: formData.allergies,
       medicalHistory: formData.medicalHistory,
+      registrationType: formData.registrationType,
+      buyerNtn: formData.buyerNtn,
       isActive: true,
       createdAt: new Date(),
       totalPurchases: 0,
@@ -283,6 +274,32 @@ export function Customers() {
           onChange={(e) => setFormData({ ...formData, medicalHistory: e.target.value })}
         />
       </div>
+
+      <div className="border-t pt-4">
+        <p className="text-sm font-semibold text-gray-600 mb-3">FBR / Tax</p>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label>Registration Type</Label>
+            <select
+              className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              value={formData.registrationType ?? ''}
+              onChange={(e) => setFormData({ ...formData, registrationType: e.target.value as 'registered' | 'unregistered' | undefined || undefined })}
+            >
+              <option value="">— Select —</option>
+              <option value="registered">Registered</option>
+              <option value="unregistered">Unregistered</option>
+            </select>
+          </div>
+          <div className="space-y-2">
+            <Label>Buyer NTN</Label>
+            <Input
+              placeholder="NTN (if registered)"
+              value={formData.buyerNtn ?? ''}
+              onChange={(e) => setFormData({ ...formData, buyerNtn: e.target.value })}
+            />
+          </div>
+        </div>
+      </div>
     </div>
   );
 
@@ -312,10 +329,8 @@ export function Customers() {
             </Button>
             <ImportHelpPopover columns={csvColumns} templateFilename="customers" entityName="Customers" />
           </div>
-          <Button variant="outline" className="gap-2" onClick={handleExportCustomers}>
-            <Download className="w-4 h-4" />
-            {t('common.export')}
-          </Button>
+          {/* Customer export removed intentionally — pharmacy data must not
+              be downloadable. Import stays so onboarding/migration works. */}
           <Button 
             className="gap-2 bg-emerald-500 hover:bg-emerald-600"
             onClick={() => setShowAddDialog(true)}
@@ -490,7 +505,7 @@ export function Customers() {
 
       {/* Add Customer Dialog */}
       <Dialog open={showAddDialog} onOpenChange={setShowAddDialog}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>{t('customers.addNew')}</DialogTitle>
             <DialogDescription>
@@ -518,7 +533,7 @@ export function Customers() {
 
       {/* Edit Customer Dialog */}
       <Dialog open={showEditDialog} onOpenChange={setShowEditDialog}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>{t('customers.editTitle')}</DialogTitle>
             <DialogDescription>
@@ -570,7 +585,7 @@ export function Customers() {
 
       {/* Customer Details Dialog */}
       <Dialog open={showDetailsDialog} onOpenChange={setShowDetailsDialog}>
-        <DialogContent className="max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
+        <DialogContent className="sm:max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
           <DialogHeader>
             <DialogTitle>{selectedCustomer?.name}</DialogTitle>
             <DialogDescription>
@@ -692,6 +707,26 @@ export function Customers() {
                               <span>Rs. {rx.items.reduce((s, i) => s + i.unitPrice * i.quantity, 0).toFixed(2)}</span>
                             </div>
                           </div>
+                          {rx.prescriptionImageUrl && (
+                            <button
+                              type="button"
+                              onClick={() => openDataUrlInNewTab(rx.prescriptionImageUrl!, `prescription-${rx.id}`)}
+                              className="mt-2 block cursor-pointer"
+                            >
+                              {rx.prescriptionImageUrl.startsWith('data:image') ? (
+                                <img
+                                  src={rx.prescriptionImageUrl}
+                                  alt="Prescription scan"
+                                  className="max-h-32 rounded border hover:opacity-90 transition"
+                                />
+                              ) : (
+                                <span className="inline-flex items-center gap-1 text-xs text-blue-600 underline">
+                                  <FileText className="w-3 h-3" />
+                                  View prescription file
+                                </span>
+                              )}
+                            </button>
+                          )}
                           {rx.notes && (
                             <p className="text-xs text-gray-500 mt-1.5 italic">{rx.notes}</p>
                           )}

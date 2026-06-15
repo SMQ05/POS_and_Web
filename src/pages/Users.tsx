@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useSettingsStore, useAuthStore } from '@/store';
+import { apiRequest, adminResetSalesPin, adminClearSalesPin } from '@/lib/backend';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -43,9 +44,13 @@ import {
   AlertCircle,
   Check,
   X,
+  KeyRound,
 } from 'lucide-react';
+
+const POS_ROLES = new Set(['owner', 'manager', 'cashier', 'salesman', 'pharmacist']);
 import { useTranslation } from '@/hooks/useTranslation';
-import type { User, UserRole } from '@/types';
+import type { User, UserRole, Permission } from '@/types';
+import { toast } from 'sonner';
 
 const roles: { value: UserRole; label: string; description: string }[] = [
   { value: 'owner', label: 'Owner', description: 'Full system access' },
@@ -68,76 +73,63 @@ const permissions = [
   { module: 'settings', label: 'Settings' },
 ];
 
-// Mock users data
-const mockUsers: User[] = [
-  {
-    id: '1',
-    name: 'Ahmad Khan',
-    email: 'owner@pharmapos.pk',
-    role: 'owner',
-    permissions: [{ module: '*', actions: ['create', 'read', 'update', 'delete'] }],
-    isActive: true,
-    createdAt: new Date('2024-01-01'),
-    lastLogin: new Date(),
-  },
-  {
-    id: '2',
-    name: 'Fatima Ali',
-    email: 'manager@pharmapos.pk',
-    role: 'manager',
-    permissions: [
-      { module: 'pos', actions: ['create', 'read', 'update'] },
-      { module: 'inventory', actions: ['create', 'read', 'update'] },
-      { module: 'reports', actions: ['read'] },
-    ],
-    isActive: true,
-    createdAt: new Date('2024-01-15'),
-    lastLogin: new Date(),
-  },
-  {
-    id: '3',
-    name: 'Usman Malik',
-    email: 'cashier@pharmapos.pk',
-    role: 'cashier',
-    permissions: [
-      { module: 'pos', actions: ['create', 'read'] },
-      { module: 'sales', actions: ['read'] },
-    ],
-    isActive: true,
-    createdAt: new Date('2024-02-01'),
-    lastLogin: new Date(),
-  },
-  {
-    id: '4',
-    name: 'Dr. Ayesha Rahman',
-    email: 'pharmacist@pharmapos.pk',
-    role: 'pharmacist',
-    permissions: [
-      { module: 'inventory', actions: ['read', 'update'] },
-      { module: 'medicines', actions: ['read'] },
-    ],
-    isActive: true,
-    createdAt: new Date('2024-02-15'),
-    lastLogin: new Date(),
-  },
-  {
-    id: '5',
-    name: 'Bilal Ahmed',
-    email: 'salesman@pharmapos.pk',
-    role: 'salesman',
-    permissions: [
-      { module: 'pos', actions: ['create', 'read'] },
-    ],
-    isActive: true,
-    createdAt: new Date('2024-03-01'),
-    lastLogin: new Date(),
-  },
-];
+const ALL_ACTIONS: Permission['actions'] = ['create', 'read', 'update', 'delete'];
+const everyModule = (actions: Permission['actions']): Permission[] =>
+  permissions.map((p) => ({ module: p.module, actions: [...actions] }));
+
+// Sensible starting permission set per role — pre-ticked when the owner picks a
+// role on the add/edit form, so they only tweak from a working baseline rather
+// than building it up from nothing. Owner is full; everyone else can be widened
+// or narrowed afterwards.
+const roleDefaultPermissions: Record<UserRole, Permission[]> = {
+  superadmin: everyModule(ALL_ACTIONS),
+  owner: everyModule(ALL_ACTIONS),
+  manager: everyModule(ALL_ACTIONS).map((p) =>
+    p.module === 'settings' || p.module === 'users'
+      ? { module: p.module, actions: ['read', 'update'] }
+      : p,
+  ),
+  cashier: [
+    { module: 'pos', actions: ['create', 'read', 'update'] },
+    { module: 'sales', actions: ['create', 'read'] },
+    { module: 'customers', actions: ['create', 'read'] },
+    { module: 'inventory', actions: ['read'] },
+    { module: 'medicines', actions: ['read'] },
+  ],
+  salesman: [
+    { module: 'pos', actions: ['create', 'read'] },
+    { module: 'sales', actions: ['create', 'read'] },
+    { module: 'customers', actions: ['create', 'read'] },
+    { module: 'medicines', actions: ['read'] },
+    { module: 'inventory', actions: ['read'] },
+  ],
+  pharmacist: [
+    { module: 'medicines', actions: ['create', 'read', 'update', 'delete'] },
+    { module: 'inventory', actions: ['read', 'update'] },
+    { module: 'pos', actions: ['create', 'read'] },
+    { module: 'sales', actions: ['create', 'read'] },
+    { module: 'customers', actions: ['create', 'read'] },
+  ],
+  accountant: [
+    { module: 'reports', actions: ['read'] },
+    { module: 'sales', actions: ['read'] },
+    { module: 'suppliers', actions: ['read'] },
+    { module: 'customers', actions: ['read'] },
+  ],
+};
+
+const defaultPermsFor = (role: UserRole): Permission[] =>
+  (roleDefaultPermissions[role] ?? []).map((p) => ({ module: p.module, actions: [...p.actions] }));
 
 export function Users() {
   const { settings } = useSettingsStore();
-  const { currentUser } = useAuthStore();
-  const [users, setUsers] = useState<User[]>(mockUsers);
+  const { currentUser, branches: branchesList } = useAuthStore();
+  const [users, setUsers] = useState<User[]>([]);
+  const [password, setPassword] = useState('');
+  // Optional POS credentials for a salesman: a short username + 4-digit PIN they
+  // type at the register to attribute (and print) the sale under their name.
+  const [salesUsername, setSalesUsername] = useState('');
+  const [salesPin, setSalesPin] = useState('');
   const { t, isRTL } = useTranslation();
 
   // Manager can only create/manage cashier and salesman accounts
@@ -149,14 +141,28 @@ export function Users() {
   const [showEditDialog, setShowEditDialog] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  // Sales PIN reset / clear
+  const [showResetPinDialog, setShowResetPinDialog] = useState(false);
+  const [resetPinTarget, setResetPinTarget] = useState<User | null>(null);
+  const [resetPinUsername, setResetPinUsername] = useState('');
+  const [resetPinValue, setResetPinValue] = useState('');
+  const [resetPinSubmitting, setResetPinSubmitting] = useState(false);
   
   const [formData, setFormData] = useState<Partial<User>>({
     name: '',
     email: '',
     role: 'cashier',
-    permissions: [],
+    permissions: defaultPermsFor('cashier'),
     isActive: true,
   });
+
+  useEffect(() => {
+    apiRequest<User[]>('/users')
+      // Super Admin is a platform-level account, not pharmacy staff — keep it out
+      // of the tenant's User Management list and its stat counts.
+      .then((list) => setUsers(list.filter((u) => u.role !== 'superadmin')))
+      .catch((error) => toast.error(error instanceof Error ? error.message : 'Unable to load users'));
+  }, []);
 
   // Filter users
   const filteredUsers = users.filter((user) => {
@@ -168,37 +174,65 @@ export function Users() {
   });
 
   // Handle add user
-  const handleAdd = () => {
-    const newUser: User = {
-      id: Date.now().toString(),
-      name: formData.name || '',
-      email: formData.email || '',
-      role: (formData.role as UserRole) || 'cashier',
-      permissions: formData.permissions || [],
-      isActive: true,
-      createdAt: new Date(),
-    };
-    
-    setUsers([...users, newUser]);
-    setShowAddDialog(false);
-    resetForm();
+  const handleAdd = async () => {
+    try {
+      const trimmedSalesUser = salesUsername.trim();
+      const newUser = await apiRequest<User>('/users', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: formData.name,
+          email: formData.email,
+          password,
+          role: formData.role,
+          permissions: formData.permissions || [],
+          isActive: formData.isActive ?? true,
+          // Optional POS login for the salesman. Only sent when both are filled.
+          ...(trimmedSalesUser && salesPin
+            ? { salesUsername: trimmedSalesUser, salesPin }
+            : {}),
+        }),
+      });
+      setUsers([...users, newUser]);
+      setShowAddDialog(false);
+      resetForm();
+      toast.success('User created');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to create user');
+    }
   };
 
   // Handle edit user
-  const handleEdit = () => {
+  const handleEdit = async () => {
     if (selectedUser) {
-      setUsers(users.map(u => u.id === selectedUser.id ? { ...u, ...formData } : u));
-      setShowEditDialog(false);
-      resetForm();
+      try {
+        const payload: Record<string, unknown> = { ...formData };
+        if (password) payload.password = password;
+        const updatedUser = await apiRequest<User>(`/users/${selectedUser.id}`, {
+          method: 'PATCH',
+          body: JSON.stringify(payload),
+        });
+        setUsers(users.map(u => u.id === selectedUser.id ? updatedUser : u));
+        setShowEditDialog(false);
+        resetForm();
+        toast.success('User updated');
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : 'Unable to update user');
+      }
     }
   };
 
   // Handle delete user
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (selectedUser) {
-      setUsers(users.filter(u => u.id !== selectedUser.id));
-      setShowDeleteDialog(false);
-      setSelectedUser(null);
+      try {
+        await apiRequest(`/users/${selectedUser.id}`, { method: 'DELETE' });
+        setUsers(users.filter(u => u.id !== selectedUser.id));
+        setShowDeleteDialog(false);
+        setSelectedUser(null);
+        toast.success('User deactivated');
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : 'Unable to deactivate user');
+      }
     }
   };
 
@@ -208,15 +242,19 @@ export function Users() {
       name: '',
       email: '',
       role: 'cashier',
-      permissions: [],
+      permissions: defaultPermsFor('cashier'),
       isActive: true,
     });
+    setPassword('');
+    setSalesUsername('');
+    setSalesPin('');
   };
 
   // Open edit dialog
   const openEditDialog = (user: User) => {
     setSelectedUser(user);
     setFormData(user);
+    setPassword('');
     setShowEditDialog(true);
   };
 
@@ -224,6 +262,50 @@ export function Users() {
   const openDeleteDialog = (user: User) => {
     setSelectedUser(user);
     setShowDeleteDialog(true);
+  };
+
+  // Open the admin "set/reset PIN" dialog for a staff member.
+  const openResetPinDialog = (user: User) => {
+    setResetPinTarget(user);
+    setResetPinUsername(user.salesUsername ?? '');
+    setResetPinValue('');
+    setShowResetPinDialog(true);
+  };
+
+  const handleResetPin = async () => {
+    if (!resetPinTarget) return;
+    if (!/^[a-zA-Z0-9._-]{2,40}$/.test(resetPinUsername)) {
+      toast.error('Username: 2–40 chars, letters/digits/._- only');
+      return;
+    }
+    if (!/^\d{4}$/.test(resetPinValue)) {
+      toast.error('PIN must be exactly 4 digits');
+      return;
+    }
+    setResetPinSubmitting(true);
+    try {
+      const updated = await adminResetSalesPin(resetPinTarget.id, resetPinUsername, resetPinValue);
+      setUsers(users.map((u) => (u.id === updated.id ? updated : u)));
+      toast.success(`PIN set for ${updated.name}. Share it securely.`);
+      setShowResetPinDialog(false);
+      setResetPinTarget(null);
+      setResetPinValue('');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to set PIN');
+    } finally {
+      setResetPinSubmitting(false);
+    }
+  };
+
+  const handleClearPin = async (user: User) => {
+    if (!confirm(`Clear ${user.name}'s POS PIN? They will not be able to process sales until a new PIN is set.`)) return;
+    try {
+      await adminClearSalesPin(user.id);
+      setUsers(users.map((u) => (u.id === user.id ? { ...u, salesPinSet: false, salesUsername: undefined } : u)));
+      toast.success('PIN cleared');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to clear PIN');
+    }
   };
 
   // Toggle permission
@@ -281,7 +363,11 @@ export function Users() {
         <Label>{t('users.role')} *</Label>
         <Select
           value={formData.role}
-          onValueChange={(value) => setFormData({ ...formData, role: value as UserRole })}
+          onValueChange={(value) =>
+            // Pre-tick the role's default permissions so the owner starts from a
+            // working baseline and only adds/removes from there.
+            setFormData({ ...formData, role: value as UserRole, permissions: defaultPermsFor(value as UserRole) })
+          }
         >
           <SelectTrigger>
             <SelectValue />
@@ -298,6 +384,85 @@ export function Users() {
           </SelectContent>
         </Select>
       </div>
+
+      {/* M6 — Per-branch access list. Owner-only. Three states per branch:
+          "none" (no entry), "read", "full". Server enforces the same rules. */}
+      {currentUser?.role === 'owner' && branchesList.length > 0 && (
+        <div className="space-y-2">
+          <Label>Branch access</Label>
+          <p className="text-xs text-gray-500 -mt-1">
+            Set per-branch access. Leave a branch with no chip = no access.
+          </p>
+          <div className="space-y-2">
+            {branchesList.map((br) => {
+              const current = (formData.branchAccess ?? []).find((e) => e.branchId === br.id)?.access;
+              const setAccess = (access: 'none' | 'read' | 'full') => {
+                const list = (formData.branchAccess ?? []).filter((e) => e.branchId !== br.id);
+                if (access !== 'none') list.push({ branchId: br.id, access });
+                setFormData({ ...formData, branchAccess: list });
+              };
+              return (
+                <div key={br.id} className="flex items-center justify-between p-2 rounded border bg-gray-50">
+                  <span className="text-sm font-medium">{br.name}</span>
+                  <div className="flex gap-1">
+                    {(['none', 'read', 'full'] as const).map((opt) => (
+                      <button
+                        key={opt}
+                        type="button"
+                        onClick={() => setAccess(opt)}
+                        className={cn(
+                          'text-[11px] px-2.5 py-1 rounded border uppercase',
+                          (current ?? 'none') === opt
+                            ? opt === 'full' ? 'bg-emerald-100 border-emerald-300 text-emerald-700'
+                              : opt === 'read' ? 'bg-amber-100 border-amber-300 text-amber-700'
+                                : 'bg-gray-100 border-gray-300 text-gray-600'
+                            : 'bg-white border-gray-200 text-gray-400 hover:bg-gray-50',
+                        )}
+                      >
+                        {opt}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      <div className="space-y-2">
+        <Label>Password {showEditDialog ? '(leave blank to keep current)' : '*'}</Label>
+        <Input
+          type="password"
+          placeholder="Minimum 8 characters"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+        />
+      </div>
+
+      {!showEditDialog && formData.role && POS_ROLES.has(formData.role) && (
+        <div className="space-y-2">
+          <Label>POS login (optional)</Label>
+          <p className="text-xs text-muted-foreground">
+            The salesman types this username + 4-digit PIN at the register to print
+            sales under their name. They can change the PIN later from My Profile.
+          </p>
+          <div className="grid grid-cols-2 gap-3">
+            <Input
+              placeholder="POS username"
+              value={salesUsername}
+              onChange={(e) => setSalesUsername(e.target.value)}
+            />
+            <Input
+              placeholder="4-digit PIN"
+              inputMode="numeric"
+              maxLength={4}
+              value={salesPin}
+              onChange={(e) => setSalesPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
+            />
+          </div>
+        </div>
+      )}
 
       <div className="space-y-2">
         <Label>{t('users.permissions')}</Label>
@@ -416,7 +581,9 @@ export function Users() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-gray-500">{t('users.onlineNow')}</p>
-                <p className="text-2xl font-bold text-amber-500">3</p>
+                <p className="text-2xl font-bold text-amber-500">
+                  {users.filter(u => Boolean(u.lastLogin)).length}
+                </p>
               </div>
               <div className="w-10 h-10 rounded-lg bg-amber-100 flex items-center justify-center">
                 <UserCog className="w-5 h-5 text-amber-600" />
@@ -457,6 +624,7 @@ export function Users() {
                 <TableRow>
                   <TableHead>{t('users.user')}</TableHead>
                   <TableHead>{t('users.role')}</TableHead>
+                  <TableHead>POS PIN</TableHead>
                   <TableHead>{t('common.status')}</TableHead>
                   <TableHead>{t('users.lastLogin')}</TableHead>
                   <TableHead className="text-right">{t('common.actions')}</TableHead>
@@ -490,6 +658,18 @@ export function Users() {
                       </Badge>
                     </TableCell>
                     <TableCell>
+                      {!POS_ROLES.has(user.role) ? (
+                        <span className="text-xs text-gray-400">—</span>
+                      ) : user.salesPinSet ? (
+                        <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200 gap-1">
+                          <Check className="w-3 h-3" />
+                          {user.salesUsername || 'set'}
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="text-amber-600 border-amber-300">not set</Badge>
+                      )}
+                    </TableCell>
+                    <TableCell>
                       <Badge variant={user.isActive ? 'success' : 'secondary'}>
                         {user.isActive ? t('common.active') : t('common.inactive')}
                       </Badge>
@@ -503,6 +683,27 @@ export function Users() {
                       <div className="flex justify-end gap-2">
                         {(currentUser?.role === 'owner' || user.role === 'cashier' || user.role === 'salesman') && (
                         <>
+                        {POS_ROLES.has(user.role) && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            title={user.salesPinSet ? 'Reset PIN' : 'Set PIN'}
+                            onClick={() => openResetPinDialog(user)}
+                          >
+                            <KeyRound className="w-4 h-4" />
+                          </Button>
+                        )}
+                        {POS_ROLES.has(user.role) && user.salesPinSet && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            title="Clear PIN"
+                            className="text-amber-600"
+                            onClick={() => handleClearPin(user)}
+                          >
+                            <X className="w-4 h-4" />
+                          </Button>
+                        )}
                         <Button
                           variant="ghost"
                           size="icon"
@@ -532,7 +733,7 @@ export function Users() {
 
       {/* Add User Dialog */}
       <Dialog open={showAddDialog} onOpenChange={setShowAddDialog}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{t('users.addNew')}</DialogTitle>
             <DialogDescription>
@@ -549,7 +750,7 @@ export function Users() {
             <Button 
               className="bg-emerald-500 hover:bg-emerald-600"
               onClick={handleAdd}
-              disabled={!formData.name || !formData.email}
+              disabled={!formData.name || !formData.email || password.length < 8}
             >
               <Save className="w-4 h-4 mr-2" />
               {t('users.createUser')}
@@ -560,7 +761,7 @@ export function Users() {
 
       {/* Edit User Dialog */}
       <Dialog open={showEditDialog} onOpenChange={setShowEditDialog}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{t('users.editTitle')}</DialogTitle>
             <DialogDescription>
@@ -605,6 +806,63 @@ export function Users() {
             <Button variant="destructive" onClick={handleDelete}>
               <Trash2 className="w-4 h-4 mr-2" />
               {t('users.deleteTitle')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Set / Reset Sales PIN Dialog (admin) */}
+      <Dialog
+        open={showResetPinDialog}
+        onOpenChange={(open) => {
+          if (resetPinSubmitting) return;
+          setShowResetPinDialog(open);
+          if (!open) { setResetPinTarget(null); setResetPinValue(''); }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <KeyRound className="w-5 h-5" />
+              {resetPinTarget?.salesPinSet ? 'Reset' : 'Set'} POS PIN for {resetPinTarget?.name}
+            </DialogTitle>
+            <DialogDescription>
+              The staff member uses this username + PIN at the POS receipt step.
+              Share these credentials with them securely.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div>
+              <Label htmlFor="reset-username">POS Username</Label>
+              <Input
+                id="reset-username"
+                value={resetPinUsername}
+                onChange={(e) => setResetPinUsername(e.target.value)}
+                autoComplete="off"
+                placeholder="e.g. ahmad"
+                disabled={resetPinSubmitting}
+              />
+            </div>
+            <div>
+              <Label htmlFor="reset-pin">4-digit PIN</Label>
+              <Input
+                id="reset-pin"
+                type="text"
+                inputMode="numeric"
+                maxLength={4}
+                value={resetPinValue}
+                onChange={(e) => setResetPinValue(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                className="font-mono tracking-widest text-center text-xl"
+                disabled={resetPinSubmitting}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowResetPinDialog(false)} disabled={resetPinSubmitting}>
+              {t('common.cancel')}
+            </Button>
+            <Button onClick={handleResetPin} disabled={resetPinSubmitting} className="bg-emerald-600 hover:bg-emerald-700">
+              {resetPinSubmitting ? 'Saving…' : 'Save PIN'}
             </Button>
           </DialogFooter>
         </DialogContent>

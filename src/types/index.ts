@@ -9,6 +9,54 @@ export interface Tenant {
   subscriptionPlan: SubscriptionPlan;
   isActive: boolean;
   createdAt: Date;
+  /** B2B network username (editable, unique). */
+  handle?: string;
+  businessType?: 'pharmacy' | 'distributor' | 'wholesaler';
+}
+
+// ─── B2B Network ─────────────────────────────────────────────────────────────
+export interface NetworkPeer { id: string; handle?: string; name: string; businessType: string; }
+export interface NetworkConnection {
+  id: string;
+  status: 'pending' | 'accepted' | 'declined' | 'blocked' | 'disconnected';
+  direction: 'incoming' | 'outgoing';
+  requestedByMe: boolean;
+  blockedByMe: boolean;
+  peer?: NetworkPeer;
+  unreadCount: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+export interface NetworkMessage {
+  id: string;
+  connectionId: string;
+  body: string;
+  mine: boolean;
+  senderName?: string;
+  readAt?: Date;
+  createdAt: Date;
+}
+export interface NetworkOrderItem {
+  id: string;
+  productName: string;
+  strength?: string;
+  packSize?: string;
+  quantity: number;
+  buyerMedicineId?: string;
+}
+export interface NetworkOrder {
+  id: string;
+  connectionId: string;
+  orderNumber: string;
+  status: 'placed' | 'accepted' | 'declined' | 'shipped' | 'received' | 'cancelled';
+  role: 'buyer' | 'seller';
+  notes?: string;
+  totalQty: number;
+  buyerPurchaseId?: string;
+  peer?: NetworkPeer;
+  items: NetworkOrderItem[];
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 // ─── RBAC ──────────────────────────────────────────────────────────────────
@@ -24,6 +72,62 @@ export interface User {
   isActive: boolean;
   createdAt: Date;
   lastLogin?: Date;
+  /** Short handle used at POS receipt time alongside the 4-digit PIN. */
+  salesUsername?: string;
+  /** True when the user has a PIN configured. Hash itself never crosses the wire. */
+  salesPinSet?: boolean;
+  /** M6 — Per-branch access entries. When undefined, falls back to legacy
+   *  single-branch + role rules in the helper (see getBranchAccess). */
+  branchAccess?: UserBranchAccess[];
+}
+
+// M6 — A single branch-access grant for a user. `access: 'read'` means the
+// user can browse data scoped to that branch but cannot create / update /
+// delete. 'full' means they can do everything their role allows on that branch.
+export interface UserBranchAccess {
+  branchId: string;
+  access: 'read' | 'full';
+}
+
+// M6 — Shift session at the POS terminal.
+export interface ShiftSession {
+  id: string;
+  branchId: string;
+  userId: string;
+  userName?: string;
+  openedAt: Date;
+  openingCash: number;
+  closedAt?: Date;
+  closingCash?: number;
+  salesTotal: number;
+  returnsTotal: number;
+  status: 'open' | 'closed';
+  notes?: string;
+}
+
+// M6 — End-of-day close summary (Z-report style).
+export interface DayCloseSummary {
+  byMethod: Record<string, number>;
+  taxTotal: number;
+  discountTotal: number;
+  salesCount: number;
+  fbrSubmitted?: number;
+  fbrFailed?: number;
+}
+export interface DayClose {
+  id: string;
+  branchId: string;
+  closedBy: string;
+  closedByName?: string;
+  closedAt: Date;
+  businessDate: Date;
+  openingCash?: number;
+  closingCash?: number;
+  salesTotal: number;
+  returnsTotal: number;
+  expensesTotal: number;
+  summary: DayCloseSummary;
+  notes?: string;
 }
 
 export interface Permission {
@@ -39,6 +143,10 @@ export interface Branch {
   phone: string;
   email: string;
   isActive: boolean;
+  /** Who pays the branch subscription — main pharmacy or the branch itself. */
+  billingPaidBy?: 'main' | 'self';
+  /** Discount % off the standard sub-branch fee when self-billing. */
+  subscriptionDiscount?: number;
   createdAt: Date;
 }
 
@@ -56,8 +164,13 @@ export interface Medicine {
   dosageForm: DosageForm;
   strength: string;
   unit: string;
+  units?: MedicineUnit[];
   barcode?: string;
   qrCode?: string;
+  /** Link to the shared catalog row this medicine came from. */
+  masterProductId?: string;
+  /** DRAP registration number, when known. */
+  drapRegNo?: string;
   isPrescriptionRequired: boolean;
   /** OTC, Prescription, or Controlled drug */
   classification: DrugClassification;
@@ -68,62 +181,222 @@ export interface Medicine {
   isActive: boolean;
   /** Whether this medicine is listed on the customer-facing web store */
   webLive: boolean;
+  taxRate?: number;
   reorderLevel: number;
   reorderQuantity: number;
+  hsCode?: string;
+  fbrUom?: string;
+  fbrSaleType?: string;
+  fbrScenarioId?: string;
+  /** Optional SRO mapping for medicines listed under a specific SRO schedule. */
+  fbrSroScheduleNo?: string;
+  fbrSroItemSerialNo?: string;
+  /** Fixed/notified retail price for 3rd-schedule drugs (per spec §4 item field). */
+  fbrFixedNotifiedValueOrRetailPrice?: number;
+  drapRegistration?: string;
+  manufacturer?: string;
+  countryOfOrigin?: string;
+  packSize?: string;
+  storageInstructions?: string;
+  taxRatePercent?: number;
+  shelfLocation?: string;
+  rackNumber?: string;
+  mrp?: number;
+  purchaseRate?: number;
+  /** Default trade price floor for discounting on POS. Batches can override. */
+  tradePrice?: number;
+  maxStock?: number;
+  allowLooseSale?: boolean;
+  schedule?: string;
+  composition?: string;
+  /** Default true. When false, excluded from low-stock alerts + auto-PO. */
+  reorderActive?: boolean;
+  /** Scanned/photographed barcode image (data URL). */
+  barcodeImageUrl?: string;
   createdAt: Date;
   updatedAt: Date;
 }
 
-export type MedicineCategory = 
+export interface MedicineUnit {
+  id: string;
+  name: string;
+  abbreviation: string;
+  multiplier: number;
+  salePrice?: number;
+  barcode?: string;
+  isBaseUnit: boolean;
+  isActive: boolean;
+}
+
+export interface TaxRule {
+  id: string;
+  name: string;
+  type: 'sales_tax' | 'further_tax' | 'extra_tax' | 'fed' | 'withholding' | 'service_tax' | 'custom';
+  ratePercent: number;
+  appliesTo: 'goods' | 'services' | 'both';
+  province?: string;
+  fbrRateLabel?: string;
+  isDefault: boolean;
+  isActive: boolean;
+}
+
+export interface ServiceCharge {
+  id: string;
+  name: string;
+  type: 'fixed' | 'percent';
+  amount: number;
+  taxable: boolean;
+  isFbrPosFee?: boolean;
+  isActive: boolean;
+}
+
+export interface DiscountRule {
+  id: string;
+  name: string;
+  type: 'line_percent' | 'line_fixed' | 'invoice_percent' | 'invoice_fixed';
+  value: number;
+  requiresApproval: boolean;
+  isActive: boolean;
+}
+
+export type FbrBusinessActivity =
+  | 'Manufacturer'
+  | 'Importer'
+  | 'Distributor'
+  | 'Wholesaler'
+  | 'Retailer'
+  | 'Exporter'
+  | 'Service Provider'
+  | 'Other';
+
+export type FbrSector =
+  | 'All Other Sectors'
+  | 'Pharmaceuticals'
+  | 'FMCG'
+  | 'Steel'
+  | 'Textile'
+  | 'Telecom'
+  | 'Petroleum'
+  | 'Electricity Distribution'
+  | 'Gas Distribution'
+  | 'Services'
+  | 'Automobile'
+  | 'CNG Stations'
+  | 'Wholesale / Retails';
+
+export interface FbrProfile {
+  enabled: boolean;
+  mode: 'sandbox' | 'production';
+  integrationType: 'pos' | 'digital_invoicing';
+  apiBaseUrl: string;
+  validateEndpoint?: string;
+  postEndpoint?: string;
+  posId?: string;
+  merchantId?: string;
+  sellerNTNCNIC: string;
+  sellerBusinessName: string;
+  sellerProvince: string;
+  sellerAddress: string;
+  bearerToken?: string;
+  includeServiceCharge: boolean;
+  lastVerifiedAt?: string;
+  /** §10 — business activity + sector drive which §9 scenarios are allowed. */
+  businessActivity?: FbrBusinessActivity;
+  sector?: FbrSector;
+  /** §9 scenario sent in sandbox payloads (omitted in production). */
+  defaultScenarioId?: string;
+  /** Hit /validateinvoicedata before /postinvoicedata. Default ON in sandbox. */
+  validateBeforePost?: boolean;
+}
+
+export type MedicineCategory =
   | 'tablets'
   | 'capsules'
+  | 'caplets'
   | 'syrups'
   | 'injections'
+  | 'ampoules'
+  | 'infusions'
   | 'drops'
   | 'creams'
   | 'ointments'
   | 'inhalers'
   | 'powders'
+  | 'granules'
   | 'suspensions'
   | 'solutions'
+  | 'surgical'
+  | 'medical_instruments'
   | 'medical_devices'
   | 'supplements'
   | 'personal_care'
   | 'baby_care'
+  | 'shampoo'
+  | 'soap'
+  | 'cosmetics'
+  | 'beauty_products'
+  | 'groceries'
+  | 'food_beverages'
+  | 'packaged_foods'
   | 'otc';
 
-export type DosageForm = 
+export type DosageForm =
   | 'tablet'
+  | 'caplet'
   | 'capsule'
   | 'syrup'
   | 'injection'
+  | 'ampoule'
+  | 'infusion'
   | 'drop'
   | 'cream'
   | 'ointment'
   | 'inhaler'
   | 'powder'
+  | 'granules'
   | 'suspension'
   | 'solution'
   | 'gel'
   | 'lotion'
   | 'spray'
-  | 'patch';
+  | 'patch'
+  | 'surgical'
+  | 'medical_instrument'
+  | 'shampoo'
+  | 'soap'
+  // Non-medicine retail lines a pharmacy also sells.
+  | 'cosmetics'
+  | 'beauty_products'
+  | 'groceries'
+  | 'food_beverages'
+  | 'packaged_foods';
 
 export interface Batch {
   id: string;
   medicineId: string;
+  /** The branch this physical stock lives in. Each branch holds its own batches. */
+  branchId?: string;
   batchNumber: string;
   expiryDate: Date;
   manufacturingDate?: Date;
   quantity: number;
   purchasePrice: number;
   salePrice: number;
+  /** Per-batch trade price override; falls back to medicine.tradePrice, then salePrice. */
+  tradePrice?: number;
   mrp: number;
   supplierId: string;
   purchaseId: string;
   location?: string;
   isActive: boolean;
+  /** Expiry-alert disposition: 'active' | 'pending_return' | 'returned' | 'disposed'. */
+  disposition?: 'active' | 'pending_return' | 'returned' | 'disposed';
+  /** Value credited (return) or written off (dispose) when actioned. */
+  dispositionValue?: number;
+  dispositionNote?: string;
+  dispositionAt?: Date;
   createdAt: Date;
+  webLive?: boolean;
   /** FEFO: days until expiry (computed helper) */
   daysUntilExpiry?: number;
   /** Expiry risk percentage 0–100 (computed helper) */
@@ -138,6 +411,8 @@ export interface Stock {
   batches: Batch[];
   lastUpdated: Date;
 }
+
+export type WeekDay = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
 
 export interface Supplier {
   id: string;
@@ -154,6 +429,171 @@ export interface Supplier {
   paymentTerms: number;
   isActive: boolean;
   createdAt: Date;
+  webLive?: boolean;
+  /** Optional weekly visit schedule. Empty/undefined = "no schedule". */
+  visitDays?: WeekDay[];
+}
+
+// M3 — Medicine ↔ distributor mapping. Powers the supplier-scoped medicine
+// picker on PO creation and the multi-distributor grouping on POS.
+export interface MedicineSupplier {
+  id: string;
+  medicineId: string;
+  supplierId: string;
+  lastTradePrice?: number;
+  lastReceivedAt?: Date;
+  isPrimary: boolean;
+  notes?: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+// M3 — A single supplier invoice attached to a PO. Multiple invoices per PO
+// model partial deliveries that each carry their own invoice number.
+export interface PurchaseInvoice {
+  id: string;
+  purchaseId: string;
+  supplierInvoiceNumber: string;
+  imageUrl?: string;
+  totalAmount: number;
+  receivedAt: Date;
+  notes?: string;
+  createdBy: string;
+  createdAt: Date;
+}
+
+// M7 — External integration partner (wholesale ERP, hospital, clinic).
+export type PartnerType = 'wholesale' | 'hospital' | 'clinic';
+export interface Partner {
+  id: string;
+  type: PartnerType;
+  name: string;
+  baseUrl?: string;
+  /** True when an API key is configured. The plaintext key never crosses the wire. */
+  apiKeySet?: boolean;
+  /** True when an inbound webhook signature secret is configured. */
+  inboundSecretSet?: boolean;
+  isActive: boolean;
+  notes?: string;
+  lastSyncAt?: Date;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+// M7 — Single outbox row representing one outbound event.
+export type OutboxStatus = 'pending' | 'sent' | 'failed' | 'skipped';
+export interface OutboxEvent {
+  id: string;
+  partnerId?: string;
+  event: string;
+  status: OutboxStatus;
+  retries: number;
+  lastError?: string;
+  nextAttemptAt?: Date;
+  sentAt?: Date;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+// M7 — Inbox thread + messages.
+export type MessageSenderType = 'tenant' | 'wholesale' | 'hospital' | 'clinic' | 'system';
+export interface InboxMessage {
+  id: string;
+  threadId: string;
+  senderType: MessageSenderType;
+  senderName?: string;
+  body: string;
+  attachmentUrl?: string;
+  readAt?: Date;
+  createdAt: Date;
+}
+export interface InboxThread {
+  id: string;
+  partnerId?: string;
+  subject: string;
+  lastMessageAt: Date;
+  unreadCount: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+// M5 — Persisted in-app notification.
+export type NotificationScope = 'tenant' | 'user' | 'role';
+export type NotificationSeverity = 'info' | 'success' | 'warning' | 'critical';
+export type NotificationKind =
+  | 'sale_return'
+  | 'payment'
+  | 'reconcile'
+  | 'purchase_return'
+  | 'wholesale'
+  | 'system';
+export interface NotificationRow {
+  id: string;
+  scope: NotificationScope;
+  userId?: string;
+  role?: string;
+  title: string;
+  body?: string;
+  severity: NotificationSeverity;
+  kind: NotificationKind;
+  link?: string;
+  dismissedAt?: Date;
+  createdAt: Date;
+}
+
+// M4 — Stock-take session and per-batch counted-vs-system snapshot.
+export type ReconcileScope = 'all' | 'category' | 'shelf' | 'medicine' | 'supplier';
+export type ReconcileStatus = 'open' | 'posted' | 'cancelled';
+export interface ReconcileRun {
+  id: string;
+  scope: ReconcileScope;
+  scopeValue?: string;
+  status: ReconcileStatus;
+  startedAt: Date;
+  completedAt?: Date;
+  notes?: string;
+  createdBy: string;
+  postedBy?: string;
+}
+export interface ReconcileEntry {
+  id: string;
+  runId: string;
+  medicineId: string;
+  batchId?: string;
+  systemQty: number;
+  countedQty: number;
+  variance: number;
+  notes?: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+// M3 — Stock returned upstream to the distributor (damaged, expired, wrong
+// shipment, etc.). items is per-batch with a reason.
+export interface PurchaseReturnItem {
+  medicineId: string;
+  medicineName?: string;
+  batchId: string;
+  batchNumber?: string;
+  quantity: number;
+  unitPrice: number;
+  total: number;
+  reason?: string;
+}
+export interface PurchaseReturn {
+  id: string;
+  returnNumber: string;
+  supplierId: string;
+  purchaseId?: string;
+  returnDate: Date;
+  items: PurchaseReturnItem[];
+  totalAmount: number;
+  reason: string;
+  stockAdjusted: boolean;
+  status: 'posted' | 'pending' | 'rejected';
+  notes?: string;
+  createdBy: string;
+  createdAt: Date;
 }
 
 export interface Purchase {
@@ -162,7 +602,12 @@ export interface Purchase {
   supplierId: string;
   branchId: string;
   purchaseDate: Date;
+  /** Calendar due date. Computed at GRN time as receiveDate + paymentTermsDays.
+   *  May be undefined for PO-stage drafts before goods arrive. */
   dueDate?: Date;
+  /** Payment terms in days, stored at PO creation (e.g. 30, 60). The actual
+   *  calendar due date is derived from this at GRN. */
+  paymentTermsDays?: number;
   items: PurchaseItem[];
   subtotal: number;
   discountAmount: number;
@@ -170,11 +615,37 @@ export interface Purchase {
   totalAmount: number;
   paidAmount: number;
   balanceAmount: number;
+  /** Supplier-issued invoice / DC number (from the printed bill they handed us) */
+  supplierInvoiceNumber?: string;
+  /** Scan/photo of the supplier's printed invoice (data URL) — uploaded at GRN time. */
+  supplierInvoiceImageUrl?: string;
+  /** Payments recorded against this PO (partial or full, any method) */
+  payments?: PurchasePayment[];
+  /** True for "loose / local purchase" — a one-step off-supplier buy used when
+   *  a customer urgently needs an out-of-stock medicine. Tracked separately so
+   *  reports can filter and supplier credit isn't affected. */
+  isLoose?: boolean;
+  /** Free-text source for loose purchases ("Khan Pharmacy", "Adjacent Medical Store"). */
+  looseSource?: string;
   status: PurchaseStatus;
+  /** Buyer closed a partially-received PO (status becomes 'received', still flagged Partial). */
+  closedPartial?: boolean;
   notes?: string;
   createdBy: string;
   createdAt: Date;
   updatedAt: Date;
+}
+
+export interface PurchasePayment {
+  id: string;
+  amount: number;
+  method: 'cash' | 'card' | 'bank_transfer' | 'cheque' | 'jazzcash' | 'easypaisa' | 'other';
+  reference?: string;
+  notes?: string;
+  /** Scan/photo proof of the payment (data URL) — cheque pic, bank receipt, etc. */
+  proofImageUrl?: string;
+  paidAt: Date;
+  recordedBy: string;
 }
 
 export interface PurchaseItem {
@@ -197,11 +668,20 @@ export interface Sale {
   id: string;
   invoiceNumber: string;
   branchId: string;
+  customerId?: string;
   customerName?: string;
   customerPhone?: string;
   customerCnic?: string;
+  /** Loyalty: points granted by this sale. */
+  loyaltyPointsEarned?: number;
+  /** Loyalty: points spent on this sale. */
+  loyaltyPointsRedeemed?: number;
+  /** Loyalty: Rs discount from redeemed points. */
+  loyaltyDiscount?: number;
   doctorName?: string;
   prescriptionNumber?: string;
+  /** Uploaded prescription image (data URL) — kept for legal/audit access on controlled drugs */
+  prescriptionImageUrl?: string;
   saleDate: Date;
   items: SaleItem[];
   subtotal: number;
@@ -214,7 +694,16 @@ export interface Sale {
   status: SaleStatus;
   isPrescription: boolean;
   notes?: string;
+  fbrStatus?: 'not_integrated' | 'pending' | 'submitted' | 'failed';
+  fbrInvoiceNumber?: string;
+  fbrBarcode?: string;
+  fbrQrPayload?: string;
+  fbrResponse?: Record<string, unknown>;
   createdBy: string;
+  /** User id of the salesperson who entered the PIN at receipt time. */
+  salesPersonId?: string;
+  /** Name snapshot — preserved on the sale even if the user is deleted later. */
+  salesPersonName?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -225,11 +714,14 @@ export interface SaleItem {
   batchId: string;
   batchNumber: string;
   quantity: number;
+  unitName?: string;
+  unitMultiplier?: number;
   unitPrice: number;
   purchasePrice: number;
   /** Gross profit = (unitPrice - purchasePrice) * quantity */
   profit: number;
   discountPercent: number;
+  taxRuleId?: string;
   taxPercent: number;
   total: number;
   expiryDate: Date;
@@ -237,7 +729,7 @@ export interface SaleItem {
   fefoOverride?: boolean;
 }
 
-export type SaleStatus = 'pending' | 'completed' | 'returned' | 'cancelled';
+export type SaleStatus = 'pending' | 'completed' | 'partial_returned' | 'returned' | 'cancelled';
 
 export interface PaymentMethod {
   method: 'cash' | 'card' | 'jazzcash' | 'easypaisa' | 'bank_transfer';
@@ -254,6 +746,10 @@ export interface SaleReturn {
   totalAmount: number;
   refundMethod: PaymentMethod;
   reason: string;
+  restockInventory: boolean;
+  fbrStatus?: 'not_required' | 'pending' | 'submitted' | 'failed';
+  fbrReference?: string;
+  fbrResponse?: Record<string, unknown>;
   createdBy: string;
   createdAt: Date;
 }
@@ -263,8 +759,12 @@ export interface SaleReturnItem {
   saleItemId: string;
   medicineId: string;
   batchId: string;
+  batchNumber?: string;
+  medicineName?: string;
   quantity: number;
   unitPrice: number;
+  discountPercent?: number;
+  taxPercent?: number;
   total: number;
 }
 
@@ -282,6 +782,9 @@ export interface Customer {
   createdAt: Date;
   totalPurchases: number;
   loyaltyPoints: number;
+  registrationType?: 'registered' | 'unregistered';
+  buyerNtn?: string;
+  webLive?: boolean;
 }
 
 // ─── Prescription ───────────────────────────────────────────────────────────
@@ -299,6 +802,8 @@ export interface Prescription {
   customerName: string;
   doctorName: string;
   prescriptionNumber?: string;
+  /** Uploaded prescription image (data URL) — kept for legal access on controlled drugs */
+  prescriptionImageUrl?: string;
   items: PrescriptionItem[];
   /** Sale IDs linked to this prescription */
   saleIds: string[];
@@ -488,6 +993,11 @@ export interface AppSettings {
   companyEmail: string;
   companyNtn: string;
   companyGst: string;
+  /** Company logo as a data URL; printed on receipts when printCompanyLogo=true. */
+  companyLogoUrl?: string;
+  /** Default profit margin % applied at GRN to auto-compute MRP from purchase price.
+   *  Industry-standard ~15 % for generics. Editable per-line at GRN. */
+  defaultMarginPercent?: number;
   defaultTaxRate: number;
   currency: string;
   language: 'en' | 'ar' | 'ur';
@@ -496,7 +1006,16 @@ export interface AppSettings {
   receiptPrinter?: string;
   barcodePrinter?: string;
   enableLoyalty: boolean;
+  /** @deprecated superseded by loyaltyRupeesPerPoint; kept for back-compat. */
   loyaltyPointsPerRupee: number;
+  /** Earn: rupees of spend that grant 1 point (default 100 → 1 pt / Rs 100). */
+  loyaltyRupeesPerPoint: number;
+  /** Redeem: rupees of discount a single point is worth (default 2). */
+  loyaltyPointValue: number;
+  /** Minimum points a customer must hold before they can redeem (default 50). */
+  loyaltyMinRedeemPoints: number;
+  /** Max share of a bill that loyalty redemption can cover, % (default 50). */
+  loyaltyMaxRedeemPercent: number;
   enableSms: boolean;
   smsApiKey?: string;
   fbrIntegration: boolean;
@@ -516,6 +1035,37 @@ export interface AppSettings {
   autoPrintReceipt: boolean;
   /** Show profit margin on POS */
   showProfitOnPOS: boolean;
+  // ── POS price visibility (M2) ──
+  // Each flag has a role allow-list. Owner is always allowed regardless.
+  // Default behaviour: purchase price hidden from non-owners, TP + sale price
+  // visible to everyone on POS.
+  showPurchasePriceOnPOS?: boolean;
+  showPurchasePriceRoles?: UserRole[];
+  showTradePriceOnPOS?: boolean;
+  showTradePriceRoles?: UserRole[];
+  showSalePriceOnPOS?: boolean;
+  showSalePriceRoles?: UserRole[];
+  // ── Per-payment-method defaults (M2) ──
+  // Auto-applied when the cashier selects that method on the payment dialog.
+  // feePercent adds a surcharge; discountPercent subtracts. Cashier can override.
+  paymentMethodDefaults?: Partial<Record<'cash' | 'card' | 'jazzcash' | 'easypaisa' | 'bank_transfer', { feePercent?: number; discountPercent?: number }>>;
+  // ── Distributor visit schedule (M3) ──
+  // When true, show visit-day chips on Suppliers list + a "Today's expected
+  // suppliers" widget on Dashboard.
+  supplierVisitDaysEnabled?: boolean;
+  // ── Shift / day-end close (M6) ──
+  // When true, the POS won't complete a sale until the cashier opens a shift.
+  shiftCloseEnabled?: boolean;
+  // When true, expose the /day-close page so a manager can run a Z-report
+  // close at end of business.
+  dayCloseEnabled?: boolean;
+  // ── Auto-PO (M7) ──
+  // When true, the auto-PO worker is allowed to draft purchase orders from
+  // low-stock medicines. Owner reviews + confirms before sending.
+  autoPoEnabled?: boolean;
+  // Multiplier applied to reorderLevel. 1.0 = exactly at reorderLevel; 1.5 =
+  // trigger 50% earlier than reorderLevel.
+  autoPoTriggerPercent?: number;
   /** Enable expiry alerts */
   enableExpiryAlerts: boolean;
   /** Enable low-stock alerts */
@@ -534,6 +1084,10 @@ export interface AppSettings {
   posEnabled: boolean;
   managementEnabled: boolean;
   webStoreEnabled: boolean;
+  taxRules: TaxRule[];
+  serviceCharges: ServiceCharge[];
+  discountRules: DiscountRule[];
+  fbrProfile: FbrProfile;
 }
 
 export interface AuditLog {

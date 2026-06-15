@@ -1,13 +1,15 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useSettingsStore, useInventoryStore } from '@/store';
+import { useSettingsStore, useInventoryStore, useAuthStore } from '@/store';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
-import { exportToCSV } from '@/lib/csv';
+import { exportToCSV, importFromCSV } from '@/lib/csv';
+import { bulkImportBatches, type BulkBatchRow } from '@/lib/backend';
+import { BranchStockDialog } from '@/components/BranchStockDialog';
 import { toast } from 'sonner';
 import {
   Table,
@@ -42,10 +44,12 @@ import {
   Calendar,
   TrendingDown,
   Download,
+  Store,
   Edit,
   History,
   ShieldAlert,
   Zap,
+  Upload,
 } from 'lucide-react';
 import { useTranslation } from '@/hooks/useTranslation';
 
@@ -87,6 +91,7 @@ export function Inventory() {
   const [stockFilter, setStockFilter] = useState<string>('all');
   const [classFilter, setClassFilter] = useState<string>('all');
   const [selectedMedicine, setSelectedMedicine] = useState<any>(null);
+  const [showBranchStock, setShowBranchStock] = useState(false);
   const [showBatchesDialog, setShowBatchesDialog] = useState(false);
   const [showAdjustmentDialog, setShowAdjustmentDialog] = useState(false);
 
@@ -198,12 +203,76 @@ export function Inventory() {
             {t('inventory.subtitle')}
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
+          <Button variant="outline" className="gap-2" onClick={() => setShowBranchStock(true)}>
+            <Store className="w-4 h-4" />
+            Branch availability
+          </Button>
           <Button variant="outline" className="gap-2" onClick={handleExportInventory}>
             <Download className="w-4 h-4" />
             {t('common.export')}
           </Button>
-          <Button 
+          {/* M4 — Download a CSV template + import batches in bulk. Useful
+              after a stock-take to bring in opening balances. */}
+          <Button
+            variant="outline"
+            className="gap-2"
+            onClick={() => {
+              const headers = ['medicineBarcode', 'batchNumber', 'expiryDate', 'manufacturingDate', 'quantity', 'purchasePrice', 'tradePrice', 'salePrice', 'mrp', 'supplierName', 'location'];
+              const example = ['8961234567890', 'B-001', '2027-12-31', '2026-01-15', '100', '20', '35', '50', '50', 'ABC Distributors', 'R-12'];
+              const csv = '﻿' + headers.map((h) => `"${h}"`).join(',') + '\n' + example.map((v) => `"${v}"`).join(',');
+              const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = 'stock-batches-template.csv';
+              a.click();
+              URL.revokeObjectURL(url);
+            }}
+          >
+            <Download className="w-4 h-4" />
+            Batch template
+          </Button>
+          <Button
+            variant="outline"
+            className="gap-2"
+            onClick={() => {
+              importFromCSV<Record<string, string>>(
+                async (rows) => {
+                  // Map every row into the BulkBatchRow shape; coerce numerics.
+                  const payload: BulkBatchRow[] = rows.map((r) => ({
+                    medicineBarcode: r.medicineBarcode || r.barcode || undefined,
+                    batchNumber: r.batchNumber || r.batch || '',
+                    expiryDate: r.expiryDate || '',
+                    manufacturingDate: r.manufacturingDate || undefined,
+                    quantity: Number(r.quantity || 0),
+                    purchasePrice: Number(r.purchasePrice || 0),
+                    tradePrice: r.tradePrice ? Number(r.tradePrice) : undefined,
+                    salePrice: Number(r.salePrice || 0),
+                    mrp: Number(r.mrp || 0),
+                    supplierName: r.supplierName || undefined,
+                    location: r.location || undefined,
+                  }));
+                  try {
+                    const result = await bulkImportBatches(payload, useAuthStore.getState().activeBranchId ?? undefined);
+                    if (result.failed === 0) {
+                      toast.success(`${result.created} batches imported`);
+                    } else {
+                      const errSample = result.results.find((r) => !r.ok)?.error ?? '';
+                      toast.error(`${result.created} imported, ${result.failed} failed. First error: ${errSample}`);
+                    }
+                  } catch (err) {
+                    toast.error(err instanceof Error ? err.message : 'Bulk import failed');
+                  }
+                },
+                (err) => toast.error(err),
+              );
+            }}
+          >
+            <Upload className="w-4 h-4" />
+            Import batches
+          </Button>
+          <Button
             className="gap-2 bg-emerald-500 hover:bg-emerald-600"
             onClick={() => navigate('/medicines')}
           >
@@ -441,7 +510,7 @@ export function Inventory() {
 
       {/* Batches Dialog */}
       <Dialog open={showBatchesDialog} onOpenChange={setShowBatchesDialog}>
-        <DialogContent className="max-w-4xl">
+        <DialogContent className="sm:max-w-4xl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Zap className="w-4 h-4 text-emerald-500" />
@@ -605,6 +674,8 @@ export function Inventory() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <BranchStockDialog open={showBranchStock} onOpenChange={setShowBranchStock} />
     </div>
   );
 }

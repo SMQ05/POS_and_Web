@@ -8,7 +8,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Pill, Eye, EyeOff, Lock, Mail, Moon, Sun, Globe } from 'lucide-react';
+import { Pill, Eye, EyeOff, Lock, Mail, Moon, Sun, Globe, Loader2 } from 'lucide-react';
+import { apiRequest } from '@/lib/backend';
 
 export function Login() {
   const navigate = useNavigate();
@@ -21,6 +22,26 @@ export function Login() {
   const [rememberMe, setRememberMe] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const [showForgot, setShowForgot] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotSending, setForgotSending] = useState(false);
+  const [forgotMessage, setForgotMessage] = useState('');
+
+  const handleForgotPassword = async () => {
+    setForgotMessage('');
+    setForgotSending(true);
+    try {
+      await apiRequest('/auth/forgot-password', {
+        method: 'POST',
+        body: JSON.stringify({ email: forgotEmail.trim() }),
+      });
+      setForgotMessage('If an account exists for that email, a reset link has been sent. Check your inbox.');
+    } catch (e) {
+      setForgotMessage('Failed to send reset link. Please try again.');
+    } finally {
+      setForgotSending(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -35,7 +56,7 @@ export function Login() {
           // Superadmin should use the dedicated super admin login
           navigate('/super-admin');
         } else {
-          navigate('/');
+          navigate('/dashboard');
         }
       } else {
         setError(t('login.invalidCredentials'));
@@ -45,17 +66,6 @@ export function Login() {
     } finally {
       setIsLoading(false);
     }
-  };
-
-  const quickLogin = (role: string) => {
-    const emails: Record<string, string> = {
-      owner: 'owner@pharmapos.pk',
-      manager: 'manager@pharmapos.pk',
-      cashier: 'cashier@pharmapos.pk',
-      salesman: 'salesman@pharmapos.pk',
-    };
-    setEmail(emails[role] || '');
-    setPassword('password');
   };
 
   return (
@@ -96,7 +106,7 @@ export function Login() {
             'text-3xl font-bold',
             settings.theme === 'dark' ? 'text-white' : 'text-gray-900'
           )}>
-            PharmaPOS
+            Kynex Pharmacloud
           </h1>
           <p className={cn(
             'mt-2',
@@ -131,7 +141,7 @@ export function Login() {
                   <Input
                     id="email"
                     type="email"
-                    placeholder="name@pharmapos.pk"
+                    placeholder="name@pharmacloud.pk"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     className={cn(
@@ -180,7 +190,12 @@ export function Login() {
                     {t('login.rememberMe')}
                   </Label>
                 </div>
-                <Button variant="link" className="text-sm p-0 h-auto">
+                <Button
+                  type="button"
+                  variant="link"
+                  className="text-sm p-0 h-auto"
+                  onClick={() => { setForgotEmail(email); setShowForgot(true); setForgotMessage(''); }}
+                >
                   {t('login.forgotPassword')}
                 </Button>
               </div>
@@ -194,53 +209,13 @@ export function Login() {
               </Button>
             </form>
           </CardContent>
-          <CardFooter className="flex flex-col gap-4">
-            <div className="relative w-full">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-gray-200" />
-              </div>
-              <div className="relative flex justify-center text-xs uppercase">
-                <span className="bg-white px-2 text-gray-500">{t('login.quickLogin')}</span>
-              </div>
-            </div>
-            <div className="flex gap-2 w-full flex-wrap">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => quickLogin('owner')}
-                className="flex-1"
-              >
-                {t('roles.owner')}
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => quickLogin('manager')}
-                className="flex-1"
-              >
-                {t('roles.manager')}
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => quickLogin('cashier')}
-                className="flex-1"
-              >
-                {t('roles.cashier')}
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => quickLogin('salesman')}
-                className="flex-1"
-              >
-                {t('roles.salesman')}
-              </Button>
-            </div>
+          <CardFooter className="flex flex-col gap-2 text-center text-sm">
+            <p className={settings.theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}>
+              Don't have an account?{' '}
+              <a href="/signup" className="text-emerald-600 hover:underline font-medium">
+                Start free trial
+              </a>
+            </p>
           </CardFooter>
         </Card>
 
@@ -248,9 +223,42 @@ export function Login() {
           'text-center text-sm mt-6',
           settings.theme === 'dark' ? 'text-gray-400' : 'text-gray-600'
         )}>
-          © 2024 PharmaPOS Pakistan. {t('login.allRightsReserved')}
+          © {new Date().getFullYear()} Kynex Solutions · Kynex Pharmacloud
         </p>
       </div>
+
+      {showForgot && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setShowForgot(false)}>
+          <div className="bg-white rounded-2xl p-6 max-w-md w-full max-h-[90vh] overflow-y-auto shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-xl font-bold text-gray-900 mb-2">Reset your password</h3>
+            <p className="text-sm text-gray-500 mb-5">Enter your email and we'll send you a reset link valid for 1 hour.</p>
+            <Label htmlFor="forgot-email" className="text-sm">Email address</Label>
+            <Input
+              id="forgot-email"
+              type="email"
+              value={forgotEmail}
+              onChange={(e) => setForgotEmail(e.target.value)}
+              placeholder="you@example.com"
+              className="mt-1.5 mb-4"
+            />
+            {forgotMessage && (
+              <div className={cn('text-sm rounded-lg p-3 mb-3', forgotMessage.startsWith('If') ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700')}>
+                {forgotMessage}
+              </div>
+            )}
+            <div className="flex gap-2 justify-end">
+              <Button variant="outline" onClick={() => setShowForgot(false)}>Close</Button>
+              <Button
+                onClick={handleForgotPassword}
+                disabled={forgotSending || !forgotEmail.trim()}
+                className="bg-emerald-600 hover:bg-emerald-700"
+              >
+                {forgotSending ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Sending</> : 'Send reset link'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

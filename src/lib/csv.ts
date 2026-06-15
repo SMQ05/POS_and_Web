@@ -1,18 +1,19 @@
 /**
  * Shared CSV Import / Export utilities.
  * Every page re-uses these two helpers so we avoid duplicating logic.
+ *
+ * Data exports are written in our proprietary encrypted ".kxv" format
+ * (unreadable in Excel/Notepad, and unreadable by competitors — the decryption
+ * key lives only on our server). Importing a .kxv decrypts via the backend
+ * while signed in. Blank templates stay plain CSV so users can fill them in Excel.
  */
+import { encryptExport, decryptExport, isEncryptedExport, needsServerDecrypt, downloadText } from './secureFile';
+import { decryptSecureExport } from './backend';
 
 // ─── EXPORT ─────────────────────────────────────────────────────────────────
 
-/** Convert an array of objects to a CSV Blob and trigger a download. */
-export function exportToCSV<T extends Record<string, unknown>>(
-  data: T[],
-  columns: { key: keyof T; label: string }[],
-  filename: string,
-) {
-  if (data.length === 0) return;
-
+/** Serialize rows to a CSV string. */
+function buildCSV<T extends object>(data: T[], columns: { key: keyof T; label: string }[]): string {
   const header = columns.map((c) => `"${String(c.label)}"`).join(',');
   const rows = data.map((row) =>
     columns
@@ -25,35 +26,58 @@ export function exportToCSV<T extends Record<string, unknown>>(
       .join(','),
   );
 
-  const csv = [header, ...rows].join('\n');
-  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `${filename}_${new Date().toISOString().slice(0, 10)}.csv`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  return [header, ...rows].join('\n');
+}
+
+/**
+ * Export rows as an encrypted proprietary file (.kxv) \u2014 gibberish in Excel /
+ * Notepad, but re-imports cleanly into this software. Falls back to plain CSV
+ * only if Web Crypto is unavailable (so the user is never blocked).
+ */
+export function exportToCSV<T extends object>(
+  data: T[],
+  columns: { key: keyof T; label: string }[],
+  filename: string,
+) {
+  if (data.length === 0) return;
+  const csv = buildCSV(data, columns);
+  const date = new Date().toISOString().slice(0, 10);
+  void encryptExport(csv)
+    .then((cipher) => downloadText(`${filename}_${date}.kxv`, cipher))
+    .catch(() => downloadText(`${filename}_${date}.csv`, '\uFEFF' + csv, 'text/csv;charset=utf-8;'));
 }
 
 // ─── IMPORT ─────────────────────────────────────────────────────────────────
 
-/** Open a file-picker, read a CSV, and return parsed rows as objects keyed by header. */
+/**
+ * Open a file-picker, read a CSV (plain template) OR an encrypted .kxv export,
+ * and return parsed rows as objects keyed by header. Encrypted files are
+ * decrypted transparently.
+ */
 export function importFromCSV<T = Record<string, string>>(
   onData: (rows: T[]) => void,
   onError?: (err: string) => void,
 ) {
   const input = document.createElement('input');
   input.type = 'file';
-  input.accept = '.csv,.txt';
+  input.accept = '.csv,.txt,.kxv';
   input.onchange = (e) => {
     const file = (e.target as HTMLInputElement).files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = (evt) => {
+    reader.onload = async (evt) => {
       try {
-        const text = evt.target?.result as string;
+        let text = evt.target?.result as string;
+        // Our encrypted export → decrypt back to CSV before parsing.
+        // KXV2 (envelope) files are decrypted by the server; legacy KXV1 locally.
+        if (isEncryptedExport(text)) {
+          try {
+            text = needsServerDecrypt(text) ? await decryptSecureExport(text) : await decryptExport(text);
+          } catch {
+            onError?.('This file could not be read — you must be signed in to this software to import it.');
+            return;
+          }
+        }
         const lines = text
           .split(/\r?\n/)
           .map((l) => l.trim())

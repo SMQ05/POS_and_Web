@@ -15,6 +15,7 @@ const Toaster = ({ ...props }: ToasterProps) => {
     <Sonner
       theme={theme as ToasterProps["theme"]}
       className="toaster group"
+      richColors
       icons={{
         success: <CircleCheckIcon className="size-4" />,
         info: <InfoIcon className="size-4" />,
@@ -24,12 +25,18 @@ const Toaster = ({ ...props }: ToasterProps) => {
       }}
       style={
         {
-          "--normal-bg": "var(--popover)",
-          "--normal-text": "var(--popover-foreground)",
-          "--normal-border": "var(--border)",
+          // These vars are HSL *channels* (e.g. "0 0% 100%"), so they must be
+          // wrapped in hsl() — otherwise the toast background is invalid and
+          // renders see-through over the page.
+          "--normal-bg": "hsl(var(--popover))",
+          "--normal-text": "hsl(var(--popover-foreground))",
+          "--normal-border": "hsl(var(--border))",
           "--border-radius": "var(--radius)",
         } as React.CSSProperties
       }
+      // Elevation only — richColors handles the (solid) per-type backgrounds and
+      // the hsl() vars above make default toasts solid.
+      toastOptions={{ classNames: { toast: "shadow-lg border" } }}
       {...props}
     />
   )

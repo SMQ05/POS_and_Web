@@ -1,0 +1,22 @@
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: pharmapos-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: pharmapos_saas
+      MYSQL_USER: pharmapos
+      MYSQL_PASSWORD: pharmapos_password
+      MYSQL_ROOT_PASSWORD: pharmapos_root_password
+    ports:
+      - "3306:3306"
+    volumes:
+      - pharmapos_mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "pharmapos", "-ppharmapos_password"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pharmapos_mysql_data:

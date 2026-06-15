@@ -50,8 +50,25 @@ export function ImportHelpPopover({ columns, templateFilename, entityName }: Imp
             onClick={() => downloadCSVTemplate(columns, templateFilename)}
           >
             <Download className="w-3 h-3" />
-            Download Template (.csv)
+            Download Empty Template (.csv)
           </Button>
+
+          {templateFilename === 'medicines' && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full gap-2 text-xs"
+              onClick={() => {
+                const a = document.createElement('a');
+                a.href = '/medicines_import_template.csv';
+                a.download = 'medicines_with_examples.csv';
+                a.click();
+              }}
+            >
+              <Download className="w-3 h-3" />
+              Download with 15 Examples (.csv)
+            </Button>
+          )}
         </div>
       </PopoverContent>
     </Popover>

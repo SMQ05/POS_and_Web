@@ -75,7 +75,7 @@ export function StoreLayout() {
                 <Pill className="w-5 h-5 text-white" />
               </div>
               <div className="hidden sm:block">
-                <h1 className="font-bold text-xl text-gray-900 leading-tight">{settings.companyName || 'PharmaPOS'}</h1>
+                <h1 className="font-bold text-xl text-gray-900 leading-tight">{settings.companyName || 'Kynex Pharmacloud'}</h1>
                 <p className="text-xs text-gray-500 -mt-0.5">Online Pharmacy</p>
               </div>
             </Link>
@@ -268,7 +268,7 @@ export function StoreLayout() {
               <div className="w-9 h-9 rounded-lg bg-emerald-500 flex items-center justify-center">
                 <Pill className="w-5 h-5 text-white" />
               </div>
-              <span className="font-bold text-lg text-white">{settings.companyName || 'PharmaPOS'}</span>
+              <span className="font-bold text-lg text-white">{settings.companyName || 'Kynex Pharmacloud'}</span>
             </div>
             <p className="text-sm text-gray-400 leading-relaxed">
               Your trusted online pharmacy in Pakistan. We deliver genuine medicines right to your doorstep.
@@ -320,7 +320,7 @@ export function StoreLayout() {
         {/* Bottom */}
         <div className="border-t border-gray-800">
           <div className="max-w-7xl mx-auto px-4 py-4 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-gray-500">
-            <p>© {new Date().getFullYear()} {settings.companyName || 'PharmaPOS Pakistan'}. All rights reserved.</p>
+            <p>© {new Date().getFullYear()} {settings.companyName || 'Kynex Pharmacloud'}. All rights reserved.</p>
             <p>Licensed Pharmacy — DRAP Registered</p>
           </div>
         </div>

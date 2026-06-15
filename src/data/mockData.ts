@@ -11,7 +11,7 @@ import type {
   Branch,
   Expense,
   LedgerEntry,
-} from '@/types';
+} from '../types/index.js';
 
 export const mockBranches: Branch[] = [
   {
@@ -20,7 +20,7 @@ export const mockBranches: Branch[] = [
     address: '123 Main Market, Gulberg',
     city: 'Lahore',
     phone: '+92-42-1234567',
-    email: 'main@pharmapos.pk',
+    email: 'main@pharmacloud.pk',
     isActive: true,
     createdAt: new Date('2024-01-01'),
   },
@@ -30,7 +30,7 @@ export const mockBranches: Branch[] = [
     address: '456 Tariq Road, PECHS',
     city: 'Karachi',
     phone: '+92-21-7654321',
-    email: 'karachi@pharmapos.pk',
+    email: 'karachi@pharmacloud.pk',
     isActive: true,
     createdAt: new Date('2024-03-15'),
   },
@@ -40,7 +40,7 @@ export const mockUsers: User[] = [
   {
     id: '1',
     name: 'Ahmad Khan',
-    email: 'owner@pharmapos.pk',
+    email: 'owner@pharmacloud.pk',
     role: 'owner',
     permissions: [{ module: '*', actions: ['create', 'read', 'update', 'delete'] }],
     branchId: '1',
@@ -51,7 +51,7 @@ export const mockUsers: User[] = [
   {
     id: '2',
     name: 'Fatima Ali',
-    email: 'manager@pharmapos.pk',
+    email: 'manager@pharmacloud.pk',
     role: 'manager',
     permissions: [
       { module: 'pos', actions: ['create', 'read', 'update'] },
@@ -66,7 +66,7 @@ export const mockUsers: User[] = [
   {
     id: '3',
     name: 'Usman Malik',
-    email: 'cashier@pharmapos.pk',
+    email: 'cashier@pharmacloud.pk',
     role: 'cashier',
     permissions: [
       { module: 'pos', actions: ['create', 'read'] },
@@ -80,7 +80,7 @@ export const mockUsers: User[] = [
   {
     id: '4',
     name: 'Dr. Ayesha Rahman',
-    email: 'pharmacist@pharmapos.pk',
+    email: 'pharmacist@pharmacloud.pk',
     role: 'pharmacist',
     permissions: [
       { module: 'inventory', actions: ['read', 'update'] },
