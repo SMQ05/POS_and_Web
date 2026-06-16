@@ -23,7 +23,6 @@ import { Reconcile } from '@/pages/Reconcile';
 import { DayClosePage } from '@/pages/DayClose';
 import { PromiseOrders } from '@/pages/PromiseOrders';
 import { Collect } from '@/pages/Collect';
-import { Partners } from '@/pages/Partners';
 import { Inbox } from '@/pages/Inbox';
 import { Network } from '@/pages/Network';
 import { Expenses } from '@/pages/Expenses';
@@ -261,7 +260,6 @@ function App() {
                   <Route path="/day-close" element={<DayClosePage />} />
                   <Route path="/promise-orders" element={<PromiseOrders />} />
                   <Route path="/collect/:invoiceNumber" element={<Collect />} />
-                  <Route path="/partners" element={<Partners />} />
                   <Route path="/inbox" element={<Inbox />} />
                   <Route path="/network" element={<Network />} />
                 </Routes>

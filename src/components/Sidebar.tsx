@@ -62,7 +62,6 @@ const menuItems = [
   { icon: ClipboardCheck, labelKey: 'nav.reconcile', path: '/reconcile', module: 'inventory', group: 'management' },
   { icon: ClipboardCheck, labelKey: 'nav.dayClose', path: '/day-close', module: 'reports', group: 'management', ownerManagerOnly: true },
   { icon: InboxIcon, labelKey: 'nav.inbox', path: '/inbox', module: 'reports', group: 'management' },
-  { icon: Server, labelKey: 'nav.partners', path: '/partners', module: 'settings', group: 'management', ownerManagerOnly: true },
   { icon: Wallet, labelKey: 'nav.expenses', path: '/expenses', module: 'expenses', group: 'management' },
   { icon: UserCog, labelKey: 'nav.users', path: '/users', module: 'users', group: 'management' },
   { icon: Building2, labelKey: 'nav.branches', path: '/branches', module: 'branches', group: 'management', ownerManagerOnly: true },

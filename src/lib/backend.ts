@@ -477,6 +477,10 @@ export async function updateNetworkProfile(data: { handle?: string; businessType
 export async function lookupHandle(handle: string): Promise<NetworkPeer & { connectionStatus: string | null }> {
   return apiRequest(`/network/lookup?handle=${encodeURIComponent(handle)}`);
 }
+export type DirectoryBusiness = NetworkPeer & { connectionStatus: string | null };
+export async function fetchNetworkDirectory(q?: string): Promise<DirectoryBusiness[]> {
+  return apiRequest<DirectoryBusiness[]>(`/network/directory${q ? `?q=${encodeURIComponent(q)}` : ''}`);
+}
 export async function fetchConnections(): Promise<NetworkConnection[]> {
   return hydrateDates(await apiRequest<NetworkConnection[]>('/network/connections'));
 }

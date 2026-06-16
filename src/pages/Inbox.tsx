@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import { fetchThreads, createThread, fetchThreadMessages, postThreadMessage, fetchPartners } from '@/lib/backend';
+import { fetchThreads, createThread, fetchThreadMessages, postThreadMessage, fetchPartners, fetchNetworkDirectory, requestConnection, type DirectoryBusiness } from '@/lib/backend';
 import type { InboxThread, InboxMessage, Partner } from '@/types';
 import { useSettingsStore } from '@/store';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -44,6 +44,28 @@ export function Inbox() {
   const [newBody, setNewBody] = useState('');
   const [newPartnerId, setNewPartnerId] = useState<string>('');
   const scrollerRef = useRef<HTMLDivElement | null>(null);
+  // Item 3 — directory of all businesses on the platform, for "add request".
+  const [directory, setDirectory] = useState<DirectoryBusiness[]>([]);
+  const [dirSearch, setDirSearch] = useState('');
+  const [connecting, setConnecting] = useState<string | null>(null);
+
+  const loadDirectory = async () => {
+    try { setDirectory(await fetchNetworkDirectory()); } catch { /* tolerate */ }
+  };
+
+  const connect = async (biz: DirectoryBusiness) => {
+    if (!biz.handle) return;
+    setConnecting(biz.id);
+    try {
+      await requestConnection(biz.handle);
+      setDirectory((prev) => prev.map((b) => (b.id === biz.id ? { ...b, connectionStatus: 'pending' } : b)));
+      toast.success(`Request sent to ${biz.name}.`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not send request');
+    } finally {
+      setConnecting(null);
+    }
+  };
 
   const refreshThreads = async () => {
     setLoading(true);
@@ -59,7 +81,14 @@ export function Inbox() {
   useEffect(() => {
     refreshThreads();
     fetchPartners().then(setPartners).catch(() => {/* tolerate */});
+    loadDirectory();
   }, []);
+
+  const dirFiltered = directory.filter((b) => {
+    if (!dirSearch.trim()) return true;
+    const q = dirSearch.toLowerCase();
+    return b.name.toLowerCase().includes(q) || (b.handle ?? '').toLowerCase().includes(q) || (b.businessType ?? '').toLowerCase().includes(q);
+  });
 
   const openThread = async (t: InboxThread) => {
     setActive(t);
@@ -128,6 +157,48 @@ export function Inbox() {
           </Button>
         </div>
       </div>
+
+      {/* Item 3 — discoverable directory of businesses on Kynex */}
+      <Card className={cn(dark && 'bg-gray-800 border-gray-700')}>
+        <CardHeader className="pb-2 flex-row items-center justify-between gap-3 space-y-0">
+          <CardTitle className="text-base">Businesses on Kynex ({directory.length})</CardTitle>
+          <Input
+            value={dirSearch}
+            onChange={(e) => setDirSearch(e.target.value)}
+            placeholder="Search hospitals, distributors, wholesalers…"
+            className="h-8 w-72 text-xs"
+          />
+        </CardHeader>
+        <CardContent>
+          {directory.length === 0 ? (
+            <p className="text-xs text-gray-500 py-3">No other businesses on the platform yet.</p>
+          ) : (
+            <ScrollArea className="max-h-56">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                {dirFiltered.map((b) => (
+                  <div key={b.id} className="flex items-center justify-between gap-2 rounded-md border p-2">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium truncate">{b.name}</p>
+                      <p className="text-[11px] text-gray-500 truncate">@{b.handle} · <span className="capitalize">{b.businessType || 'business'}</span></p>
+                    </div>
+                    {b.connectionStatus === 'accepted' ? (
+                      <Badge className="bg-emerald-100 text-emerald-700 border-emerald-300 text-[10px]">Connected</Badge>
+                    ) : b.connectionStatus === 'pending' ? (
+                      <Badge variant="outline" className="text-[10px] text-amber-600 border-amber-300">Requested</Badge>
+                    ) : b.connectionStatus === 'blocked' ? (
+                      <Badge variant="outline" className="text-[10px] text-gray-400">Blocked</Badge>
+                    ) : (
+                      <Button size="sm" variant="outline" className="h-7 gap-1 text-xs text-emerald-700" disabled={connecting === b.id} onClick={() => connect(b)}>
+                        <Plus className="w-3 h-3" /> Add request
+                      </Button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </ScrollArea>
+          )}
+        </CardContent>
+      </Card>
 
       <div className="grid grid-cols-1 lg:grid-cols-[320px,1fr] gap-4 min-h-[calc(100vh-16rem)]">
         <Card className={cn(dark && 'bg-gray-800 border-gray-700')}>

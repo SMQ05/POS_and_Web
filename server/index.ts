@@ -3076,6 +3076,31 @@ app.get('/api/network/lookup', requireAuth, async (req, res) => {
   res.json({ id: t.id, handle: t.handle, name: t.name, businessType: t.businessType, connectionStatus: existing?.status ?? null });
 });
 
+// Item 3 — discoverable directory of every other active business on the
+// platform (hospitals / distributors / wholesalers), each tagged with its
+// connection status to the current tenant so the Inbox can offer "add request".
+app.get('/api/network/directory', requireAuth, async (req, res) => {
+  const me = tenantId(req);
+  const q = typeof req.query.q === 'string' ? req.query.q.trim().toLowerCase() : '';
+  const tenants = await prisma.tenant.findMany({
+    where: {
+      isActive: true,
+      id: { not: me },
+      ...(q ? { OR: [{ handle: { contains: q } }, { name: { contains: q } }] } : {}),
+    },
+    select: TENANT_MINI,
+    orderBy: { name: 'asc' },
+    take: 200,
+  });
+  // One query for all of my connections, then map status per business.
+  const conns = await prisma.connection.findMany({ where: { OR: [{ aTenantId: me }, { bTenantId: me }] } });
+  const statusFor = (id: string) => {
+    const c = conns.find((x) => (x.aTenantId === me && x.bTenantId === id) || (x.bTenantId === me && x.aTenantId === id));
+    return c?.status ?? null;
+  };
+  res.json(tenants.map((t) => ({ id: t.id, handle: t.handle, name: t.name, businessType: t.businessType, connectionStatus: statusFor(t.id) })));
+});
+
 // My connections (membership), with peer info + unread counts.
 app.get('/api/network/connections', requireAuth, async (req, res) => {
   const me = tenantId(req);
