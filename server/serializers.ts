@@ -65,6 +65,29 @@ export function dayClose(row: any) {
   };
 }
 
+export function promiseOrder(row: any) {
+  return {
+    id: row.id,
+    branchId: row.branchId,
+    customerId: row.customerId ?? undefined,
+    customerName: row.customerName,
+    customerPhone: row.customerPhone ?? undefined,
+    itemName: row.itemName,
+    medicineId: row.medicineId ?? undefined,
+    quantity: row.quantity,
+    advanceAmount: row.advanceAmount,
+    purchaseCost: row.purchaseCost ?? undefined,
+    finalPrice: row.finalPrice ?? undefined,
+    status: row.status,
+    notes: row.notes ?? undefined,
+    createdBy: row.createdBy,
+    purchasedAt: row.purchasedAt ?? undefined,
+    settledAt: row.settledAt ?? undefined,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
 export function branch(row: any): Branch {
   return {
     id: row.id,

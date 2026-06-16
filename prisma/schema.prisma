@@ -53,6 +53,7 @@ model Tenant {
   notifications     Notification[]
   shiftSessions     ShiftSession[]
   dayCloses         DayClose[]
+  promiseOrders     PromiseOrder[]
   partners          Partner[]
   outboxItems       OutboxEvent[]
   threads           Thread[]
@@ -574,6 +575,36 @@ model DayClose {
   createdAt     DateTime @default(now())
 
   @@index([tenantId, branchId, businessDate])
+}
+
+// Customer promise / advance order (layaway). A customer asks for a medicine we
+// don't stock; we take an advance, buy it later (recording our purchase cost),
+// then settle on hand-over: collect the balance if the final price exceeds the
+// advance, or refund if it's less.
+model PromiseOrder {
+  id             String    @id @default(cuid())
+  tenantId       String
+  tenant         Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branchId       String
+  customerId     String?
+  customerName   String
+  customerPhone  String?
+  itemName       String                       // free text — may not be in the catalog yet
+  medicineId     String?                      // linked once it exists in our catalog
+  quantity       Int       @default(1)
+  advanceAmount  Float     @default(0)         // taken upfront
+  purchaseCost   Float?                        // our cost, entered when we buy it
+  finalPrice     Float?                        // price charged to the customer at hand-over
+  status         String    @default("pending") // pending | purchased | settled | cancelled
+  notes          String?   @db.VarChar(500)
+  createdBy      String
+  purchasedAt    DateTime?
+  settledAt      DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([tenantId, status])
+  @@index([tenantId, customerId])
 }
 
 // M5.1 — Web Push subscription. One per browser/device per user. Created via

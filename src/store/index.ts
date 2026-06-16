@@ -20,6 +20,7 @@ import type {
   Permission,
   LedgerEntry,
   Expense,
+  PromiseOrder,
   Prescription,
   PrescriptionItem,
   SyncQueueItem,
@@ -1290,6 +1291,27 @@ export const useExpenseStore = create<ExpenseState>((set, get) => ({
     get()
       .expenses.filter((e) => e.category === category)
       .reduce((s, e) => s + e.amount, 0),
+}));
+
+// ─── Promise / Advance Order Store (feature 4) ──────────────────────────────
+interface PromiseOrderState {
+  promiseOrders: PromiseOrder[];
+  addPromiseOrder: (order: PromiseOrder) => void;
+  updatePromiseOrder: (id: string, updates: Partial<PromiseOrder>) => void;
+}
+
+export const usePromiseOrderStore = create<PromiseOrderState>((set) => ({
+  promiseOrders: [],
+  addPromiseOrder: (order) => {
+    set((state) => ({ promiseOrders: [order, ...state.promiseOrders] }));
+    persistCreate('promise-orders', order);
+  },
+  updatePromiseOrder: (id, updates) => {
+    set((state) => ({
+      promiseOrders: state.promiseOrders.map((o) => (o.id === id ? { ...o, ...updates, updatedAt: new Date() } : o)),
+    }));
+    persistUpdate('promise-orders', id, updates);
+  },
 }));
 
 // ─── Prescription Store ─────────────────────────────────────────────────────

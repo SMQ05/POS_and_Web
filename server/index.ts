@@ -927,6 +927,7 @@ app.get('/api/bootstrap', requireAuth, async (req, res) => {
     medicineSuppliers,
     purchaseInvoices,
     purchaseReturns,
+    promiseOrders,
   ] = await Promise.all([
     prisma.tenant.findUnique({ where: { id } }),
     prisma.branch.findMany({ where: { tenantId: id, isActive: true }, orderBy: { createdAt: 'asc' } }),
@@ -942,6 +943,7 @@ app.get('/api/bootstrap', requireAuth, async (req, res) => {
     prisma.medicineSupplier.findMany({ where: { tenantId: id } }),
     prisma.purchaseInvoice.findMany({ where: { tenantId: id }, orderBy: { receivedAt: 'asc' }, take: 1000 }),
     prisma.purchaseReturn.findMany({ where: { tenantId: id }, orderBy: { returnDate: 'desc' }, take: 500 }),
+    prisma.promiseOrder.findMany({ where: { tenantId: id }, orderBy: { createdAt: 'desc' }, take: 500 }),
   ]);
 
   if (!tenant) return res.status(404).json({ error: 'Tenant not found' });
@@ -971,6 +973,7 @@ app.get('/api/bootstrap', requireAuth, async (req, res) => {
     medicineSuppliers: medicineSuppliers.map(serialize.medicineSupplier),
     purchaseInvoices: purchaseInvoices.map(serialize.purchaseInvoice),
     purchaseReturns: purchaseReturns.map(serialize.purchaseReturn),
+    promiseOrders: promiseOrders.map(serialize.promiseOrder),
   });
 });
 
@@ -5067,6 +5070,56 @@ app.get('/api/fbr-submissions', requireAuth, requireRole('superadmin', 'owner', 
     },
   });
   res.json(rows);
+});
+
+// ─── Feature 4 — Customer promise / advance orders ──────────────────────────
+const promiseOrderCreateSchema = z.object({
+  id: z.string().optional(),
+  branchId: z.string().min(1),
+  customerId: z.string().optional().nullable(),
+  customerName: z.string().trim().min(1).max(200),
+  customerPhone: z.string().trim().max(20).optional().nullable(),
+  itemName: z.string().trim().min(1).max(200),
+  medicineId: z.string().optional().nullable(),
+  quantity: z.number().int().positive().default(1),
+  advanceAmount: z.number().nonnegative().default(0),
+  purchaseCost: z.number().nonnegative().optional().nullable(),
+  finalPrice: z.number().nonnegative().optional().nullable(),
+  status: z.enum(['pending', 'purchased', 'settled', 'cancelled']).default('pending'),
+  notes: z.string().trim().max(500).optional().nullable(),
+  createdBy: z.string().min(1),
+});
+const promiseOrderPatchSchema = promiseOrderCreateSchema.partial().extend({
+  purchasedAt: z.coerce.date().optional().nullable(),
+  settledAt: z.coerce.date().optional().nullable(),
+});
+
+app.post('/api/promise-orders', requireAuth, requireBranchWrite((req) => req.body?.branchId), async (req, res) => {
+  try {
+    const data = promiseOrderCreateSchema.parse(req.body);
+    const row = await prisma.promiseOrder.create({ data: { ...data, tenantId: tenantId(req) } as never });
+    res.status(201).json(serialize.promiseOrder(row));
+  } catch (error) {
+    return sendParseError(res, error);
+  }
+});
+
+app.patch('/api/promise-orders/:id', requireAuth, async (req, res) => {
+  try {
+    const tId = tenantId(req);
+    const data = promiseOrderPatchSchema.parse(req.body);
+    const existing = await prisma.promiseOrder.findFirst({ where: { id: req.params.id, tenantId: tId } });
+    if (!existing) return res.status(404).json({ error: 'Promise order not found' });
+    if (!(await assertBranchWrite(req, res, existing.branchId))) return;
+    // Stamp the lifecycle timestamps when the status advances.
+    const stamps: Record<string, unknown> = {};
+    if (data.status === 'purchased' && !existing.purchasedAt) stamps.purchasedAt = new Date();
+    if (data.status === 'settled' && !existing.settledAt) stamps.settledAt = new Date();
+    const row = await prisma.promiseOrder.update({ where: { id: existing.id }, data: { ...data, ...stamps } as never });
+    res.json(serialize.promiseOrder(row));
+  } catch (error) {
+    return sendParseError(res, error);
+  }
 });
 
 // Feature 2 — email a purchase order to a distributor, optionally with a PDF

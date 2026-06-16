@@ -9,6 +9,7 @@ import type {
   Purchase,
   PurchaseInvoice,
   PurchaseReturn,
+  PromiseOrder,
   Sale,
   SaleReturn,
   Supplier,
@@ -42,6 +43,7 @@ export interface BootstrapResponse {
   medicineSuppliers?: MedicineSupplier[];
   purchaseInvoices?: PurchaseInvoice[];
   purchaseReturns?: PurchaseReturn[];
+  promiseOrders?: PromiseOrder[];
 }
 
 function getToken(): string {

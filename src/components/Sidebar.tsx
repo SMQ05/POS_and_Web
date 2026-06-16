@@ -36,6 +36,7 @@ import {
   Server,
   Inbox as InboxIcon,
   Share2,
+  HandCoins,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -53,6 +54,7 @@ const menuItems = [
   { icon: Pill, labelKey: 'nav.medicines', path: '/medicines', module: 'medicines', group: 'management' },
   { icon: Truck, labelKey: 'nav.suppliers', path: '/suppliers', module: 'suppliers', group: 'management' },
   { icon: ClipboardList, labelKey: 'nav.purchaseOrders', path: '/purchase-orders', module: 'suppliers', group: 'management' },
+  { icon: HandCoins, labelKey: 'nav.promiseOrders', path: '/promise-orders', module: 'customers', group: 'management' },
   { icon: Users, labelKey: 'nav.customers', path: '/customers', module: 'customers', group: 'management' },
   { icon: Share2, labelKey: 'nav.network', path: '/network', module: 'suppliers', group: 'management', ownerManagerOnly: true },
   { icon: AlertTriangle, labelKey: 'nav.alerts', path: '/alerts', module: 'alerts', group: 'management' },

@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useNavigate } from 'react-router-dom';
-import { useAuthStore, useInventoryStore, useSupplierStore, useCustomerStore, useSalesStore, useExpenseStore, useLedgerStore, useSettingsStore, useNotificationStore, useNetworkStore } from '@/store';
+import { useAuthStore, useInventoryStore, useSupplierStore, useCustomerStore, useSalesStore, useExpenseStore, useLedgerStore, useSettingsStore, useNotificationStore, useNetworkStore, usePromiseOrderStore } from '@/store';
 import { getBootstrapData } from '@/lib/backend';
 import { Layout } from '@/components/Layout';
 import { Login } from '@/pages/Login';
@@ -21,6 +21,7 @@ import { Ledger } from '@/pages/Ledger';
 import { Audit } from '@/pages/Audit';
 import { Reconcile } from '@/pages/Reconcile';
 import { DayClosePage } from '@/pages/DayClose';
+import { PromiseOrders } from '@/pages/PromiseOrders';
 import { Partners } from '@/pages/Partners';
 import { Inbox } from '@/pages/Inbox';
 import { Network } from '@/pages/Network';
@@ -73,6 +74,7 @@ function DataInitializer() {
         useSalesStore.setState({ sales: data.sales, saleReturns: data.saleReturns });
         useExpenseStore.setState({ expenses: data.expenses });
         useLedgerStore.setState({ entries: data.ledgerEntries });
+        usePromiseOrderStore.setState({ promiseOrders: data.promiseOrders ?? [] });
         if (data.tenant.settings) updateSettings(data.tenant.settings as Partial<AppSettings>);
       })
       .catch((error) => {
@@ -256,6 +258,7 @@ function App() {
                   <Route path="/audit" element={<Audit />} />
                   <Route path="/reconcile" element={<Reconcile />} />
                   <Route path="/day-close" element={<DayClosePage />} />
+                  <Route path="/promise-orders" element={<PromiseOrders />} />
                   <Route path="/partners" element={<Partners />} />
                   <Route path="/inbox" element={<Inbox />} />
                   <Route path="/network" element={<Network />} />

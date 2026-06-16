@@ -118,6 +118,28 @@ export interface ShiftSession {
   notes?: string;
 }
 
+// Feature 4 — customer promise / advance order (layaway).
+export interface PromiseOrder {
+  id: string;
+  branchId: string;
+  customerId?: string;
+  customerName: string;
+  customerPhone?: string;
+  itemName: string;
+  medicineId?: string;
+  quantity: number;
+  advanceAmount: number;
+  purchaseCost?: number;
+  finalPrice?: number;
+  status: 'pending' | 'purchased' | 'settled' | 'cancelled';
+  notes?: string;
+  createdBy: string;
+  purchasedAt?: Date;
+  settledAt?: Date;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 // M6 — End-of-day close summary (Z-report style).
 export interface DayCloseSummary {
   byMethod: Record<string, number>;
