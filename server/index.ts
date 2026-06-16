@@ -2,6 +2,8 @@ import dotenv from 'dotenv';
 dotenv.config({ override: true });
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
 import bcrypt from 'bcryptjs';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -76,6 +78,20 @@ const IS_PROD = process.env.NODE_ENV === 'production';
 const host = process.env.HOST || (IS_PROD ? '0.0.0.0' : '127.0.0.1');
 const frontendOrigin = process.env.FRONTEND_ORIGIN || 'http://127.0.0.1:5173';
 
+// Trust the reverse proxy (Passenger/nginx) so req.ip reflects the real client
+// IP from X-Forwarded-For — needed for rate limiting to key on the actual caller.
+app.set('trust proxy', 1);
+
+// SECURITY: baseline HTTP hardening. HSTS (force HTTPS), nosniff, frameguard
+// (clickjacking), referrer policy, hide X-Powered-By. CSP is left disabled here
+// because the SPA/print windows inject inline styles/scripts; tighten later with
+// a nonce-based policy if desired.
+app.use(helmet({
+  contentSecurityPolicy: false,
+  crossOriginEmbedderPolicy: false,
+  hsts: IS_PROD ? { maxAge: 31536000, includeSubDomains: true, preload: true } : false,
+}));
+
 // In production we serve the frontend ourselves; CORS only needed for dev.
 // In dev, accept ANY localhost / 127.0.0.1 origin (any port) so it can't fail on
 // a localhost-vs-127.0.0.1 mismatch.
@@ -104,6 +120,30 @@ app.use(express.json({
     (req as unknown as { rawBody?: Buffer }).rawBody = buf;
   },
 }));
+
+// SECURITY: brute-force / abuse protection. `authLimiter` guards credential and
+// token endpoints (login, signup, password reset) against online guessing and
+// email/SMS-cost abuse. `apiLimiter` is a generous catch-all that stops a single
+// client from hammering the whole API. Disabled in dev so it never gets in the
+// way of local testing.
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: IS_PROD ? 20 : 100000,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: 'Too many attempts. Please wait a few minutes and try again.' },
+});
+const apiLimiter = rateLimit({
+  // Generous: several POS terminals in one shop share a public IP and poll for
+  // notifications, so this is only an anti-hammering backstop. Brute-force
+  // protection comes from authLimiter, not this.
+  windowMs: 60 * 1000,
+  limit: IS_PROD ? 1000 : 1000000,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: 'Too many requests. Please slow down.' },
+});
+app.use('/api', apiLimiter);
 
 // ─── Zod schemas ─────────────────────────────────────────────────────────────
 
@@ -454,8 +494,10 @@ const customerCreateSchema = z.object({
   allergies: z.array(z.string()).optional(),
   medicalHistory: z.string().trim().max(2000).optional(),
   isActive: z.boolean().default(true),
-  totalPurchases: z.number().nonnegative().default(0),
-  loyaltyPoints: z.number().int().nonnegative().default(0),
+  // SECURITY: loyaltyPoints and totalPurchases are intentionally NOT accepted from
+  // the client — they're server-managed (see applyLoyaltyForSale). Accepting them
+  // here let any user PATCH a customer to an arbitrary point balance and then
+  // redeem it as a discount (mint money). They default to 0 at the DB level.
   registrationType: z.enum(['registered', 'unregistered']).optional(),
   buyerNtn: z.string().trim().max(15).optional(),
 });
@@ -523,6 +565,37 @@ const saleCreateSchema = z.object({
 
 const salePatchSchema = saleCreateSchema.partial();
 
+// SECURITY (financial integrity): the client sends the money fields, and they're
+// stored + fed to the ledger and FBR. Without a check, a cashier could sell real
+// goods (stock IS drawn down server-side) while recording totalAmount: 0 — a
+// classic under-ringing / skim. We don't silently overwrite (the printed receipt
+// must match the stored row), but we REJECT totals that don't reconcile with the
+// line items. The client total = Σ(qty·unitPrice) − lineDiscounts + tax + service
+// charges − loyaltyDiscount; service charges and tax only ADD, so a consistent
+// total can never fall below (subtotal − discount − loyalty). A 1-rupee epsilon
+// absorbs rounding. Returns an error string, or null when consistent.
+function checkSaleTotals(data: {
+  items: { quantity: number; unitPrice: number; total: number; discountPercent?: number }[];
+  subtotal: number; discountAmount: number; taxAmount: number; totalAmount: number;
+  loyaltyDiscount?: number;
+}): string | null {
+  const EPS = 1.0;
+  let lineSum = 0;
+  for (const it of data.items) {
+    const expected = it.quantity * it.unitPrice;
+    if (Math.abs(it.total - expected) > EPS) return 'Line total does not match quantity × unit price';
+    lineSum += it.total;
+  }
+  if (Math.abs(data.subtotal - lineSum) > EPS) return 'Subtotal does not match line items';
+  if (data.discountAmount < -EPS || data.discountAmount > data.subtotal + EPS) return 'Invalid discount amount';
+  if (data.taxAmount < -EPS) return 'Invalid tax amount';
+  const loyalty = data.loyaltyDiscount ?? 0;
+  if (loyalty < -EPS || loyalty > data.subtotal + EPS) return 'Invalid loyalty discount';
+  const minTotal = data.subtotal - data.discountAmount - loyalty - EPS;
+  if (data.totalAmount < minTotal) return 'Total amount is inconsistent with items, discount and tax';
+  return null;
+}
+
 const purchaseItemCreateSchema = z.object({
   id: z.string().optional(),
   medicineId: z.string().min(1),
@@ -575,6 +648,25 @@ const purchaseCreateSchema = z.object({
 });
 
 const purchasePatchSchema = purchaseCreateSchema.partial();
+
+// SECURITY (financial integrity): totalAmount drives the supplier payable balance
+// and the payables ledger. Guard against it being set independently of the line
+// items (inflating/deflating what's owed a supplier). Lenient lower-bound check —
+// tax/service only adds, so a consistent total can't fall below subtotal−discount.
+function checkPurchaseTotals(data: {
+  items: { quantity: number; purchasePrice: number; total: number }[];
+  subtotal: number; discountAmount: number; totalAmount: number;
+}): string | null {
+  const EPS = 1.0;
+  const lineSum = data.items.reduce((s, it) => s + it.total, 0);
+  if (data.subtotal > 0 && Math.abs(data.subtotal - lineSum) > Math.max(EPS, lineSum * 0.02)) {
+    return 'Subtotal does not match line items';
+  }
+  if (data.totalAmount + EPS < data.subtotal - data.discountAmount) {
+    return 'Total amount is inconsistent with items and discount';
+  }
+  return null;
+}
 
 const expenseCreateSchema = z.object({
   category: z.enum(['rent', 'salary', 'utilities', 'marketing', 'other']),
@@ -699,43 +791,30 @@ app.get('/health', (_req, res) => {
   res.json({ ok: true, service: 'kynex-pharmacloud-api' });
 });
 
-app.get('/api/_debug', async (_req, res) => {
+// SECURITY: superadmin-only. Previously public, this leaked infra details
+// (DB host/user, engine paths) plus live tenant/user counts and demo-user emails
+// to anonymous callers — a recon goldmine. Now gated and trimmed of sensitive
+// fields; raw DB error strings are never echoed to the client.
+app.get('/api/_debug', requireAuth, requireRole('superadmin'), async (_req, res) => {
   const result: Record<string, unknown> = {
     nodeEnv: process.env.NODE_ENV,
-    cwd: process.cwd(),
     dbUrlSource: dbUrlInfo.source,
-    dbUrlMasked: dbUrlInfo.masked,
-    forcedEnginePath: dbUrlInfo.forcedEnginePath,
-    prismaEngineLibrary: process.env.PRISMA_QUERY_ENGINE_LIBRARY ?? null,
-    processEnvDbUrlMasked: process.env.DATABASE_URL
-      ? process.env.DATABASE_URL.replace(/:\/\/([^:]+):[^@]*@/, '://$1:***@')
-      : null,
-    processEnvHasBackslash: process.env.DATABASE_URL?.includes('\\%') ?? false,
   };
   try {
-    const tenantCount = await prisma.tenant.count();
-    const userCount = await prisma.user.count();
-    const demoTenant = await prisma.tenant.findUnique({
-      where: { slug: 'demo-pharmacy' },
-      select: { id: true, slug: true, name: true, isActive: true, status: true },
-    });
-    const demoUsers = await prisma.user.findMany({
-      where: { tenant: { slug: 'demo-pharmacy' } },
-      select: { email: true, role: true, isActive: true },
-    });
     result.dbConnection = 'OK';
-    result.tenantCount = tenantCount;
-    result.userCount = userCount;
-    result.demoTenant = demoTenant;
-    result.demoUsers = demoUsers;
+    result.tenantCount = await prisma.tenant.count();
+    result.userCount = await prisma.user.count();
   } catch (e) {
     result.dbConnection = 'FAILED';
-    result.dbError = e instanceof Error ? e.message : String(e);
+    console.error('[_debug] db check failed:', e);
   }
   res.json(result);
 });
 
-app.post('/api/tenants', async (req, res) => {
+// SECURITY: superadmin-only. Self-serve signup is the email-verified, rate-limited
+// `/api/auth/signup` path. This older endpoint minted owner-role accounts (and a
+// valid token) for anonymous callers — unbounded tenant/account creation + DoS.
+app.post('/api/tenants', requireAuth, requireRole('superadmin'), async (req, res) => {
   try {
     const data = createTenantSchema.parse(req.body);
     const passwordHash = await bcrypt.hash(data.ownerPassword, 12);
@@ -820,7 +899,7 @@ app.post('/api/tenants', async (req, res) => {
   }
 });
 
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/login', authLimiter, async (req, res) => {
   // Fire-and-forget audit writer. Only writes when we have a known tenant —
   // unknown-email attempts can't write because tenantId is required + FK.
   const writeLoginAudit = async (
@@ -3615,16 +3694,21 @@ app.post('/api/webhooks/wholesale/inbound', async (req, res) => {
   const tenant = await prisma.tenant.findUnique({ where: { slug: tenantSlug } });
   if (!tenant) return res.status(404).json({ error: 'Tenant not found' });
 
-  let partner = null;
-  if (partnerId) {
-    partner = await prisma.partner.findFirst({ where: { id: partnerId, tenantId: tenant.id } });
+  // SECURITY: fail CLOSED. This endpoint is unauthenticated (it's a partner
+  // webhook), so it must require a known partner that has a shared secret AND a
+  // matching signature — otherwise anyone who guesses a tenant slug could inject
+  // inbox messages and fire owner notifications (spam / phishing vector).
+  if (!partnerId) return res.status(401).json({ error: 'partnerId required' });
+  const partner = await prisma.partner.findFirst({ where: { id: partnerId, tenantId: tenant.id } });
+  if (!partner || !partner.inboundSecret) {
+    return res.status(401).json({ error: 'Unknown partner or no inbound secret configured' });
   }
-  // Optional signature check (skipped when partner has no secret configured).
-  if (partner?.inboundSecret) {
-    const provided = req.query.signature ?? req.headers['x-pharmapos-signature'];
-    if (provided !== partner.inboundSecret) {
-      return res.status(401).json({ error: 'Invalid signature' });
-    }
+  const provided = String(req.query.signature ?? req.headers['x-pharmapos-signature'] ?? '');
+  const expected = partner.inboundSecret;
+  const providedBuf = Buffer.from(provided);
+  const expectedBuf = Buffer.from(expected);
+  if (providedBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(providedBuf, expectedBuf)) {
+    return res.status(401).json({ error: 'Invalid signature' });
   }
 
   let thread = threadId
@@ -4254,8 +4338,57 @@ class InsufficientStockError extends Error {
   }
 }
 
+// Thrown when a sale tries to redeem more loyalty points than the customer holds.
+// Surfaced as a 400 so the client can't mint points and spend them as discount.
+class LoyaltyError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'LoyaltyError';
+  }
+}
+
 type SaleTxClient = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
 interface StockLine { batchId: string; batchNumber?: string; quantity: number }
+
+// SECURITY (financial integrity): the loyalty balance is now managed SERVER-SIDE.
+// Direct client writes to customer.loyaltyPoints/totalPurchases are stripped from
+// the customer schema, so the only way points move is here, atomically inside the
+// sale transaction: we verify the customer can't redeem more than they hold, and
+// we cap "earned" against the tenant's configured rate so the client can't inject
+// an inflated earn. Runs once, when a sale becomes completed.
+async function applyLoyaltyForSale(
+  tx: SaleTxClient,
+  tenantIdValue: string,
+  sale: { customerId?: string | null; totalAmount: number; loyaltyPointsEarned?: number | null; loyaltyPointsRedeemed?: number | null },
+): Promise<void> {
+  if (!sale.customerId) return;
+  const redeemed = Math.max(0, Math.floor(sale.loyaltyPointsRedeemed ?? 0));
+  const earnedClaim = Math.max(0, Math.floor(sale.loyaltyPointsEarned ?? 0));
+  if (redeemed === 0 && earnedClaim === 0) return;
+
+  const customer = await tx.customer.findFirst({
+    where: { id: sale.customerId, tenantId: tenantIdValue },
+    select: { loyaltyPoints: true },
+  });
+  if (!customer) return;
+  if (redeemed > customer.loyaltyPoints) {
+    throw new LoyaltyError('Insufficient loyalty points to redeem');
+  }
+
+  // Cap earned by the tenant's configured earn rate (default 1 pt/rupee) so a
+  // tampered client can't claim more points than the purchase warrants.
+  const tenant = await tx.tenant.findUnique({ where: { id: tenantIdValue }, select: { settings: true } });
+  const s = (tenant?.settings as Record<string, unknown>) ?? {};
+  const loyaltyEnabled = s.enableLoyalty !== false;
+  const pointsPerRupee = Math.max(0, Number(s.loyaltyPointsPerRupee ?? 1) || 0);
+  const earnedCap = Math.ceil(Math.max(0, sale.totalAmount) * pointsPerRupee) + 1; // +1 absorbs rounding
+  const earned = loyaltyEnabled ? Math.min(earnedClaim, earnedCap) : 0;
+
+  await tx.customer.update({
+    where: { id: sale.customerId },
+    data: { loyaltyPoints: { increment: earned - redeemed }, totalPurchases: { increment: 1 } },
+  });
+}
 
 // Atomically validate + decrement batch stock for a completed sale. Treats
 // batch.quantity in the SAME unit as the sale line `quantity`, matching the
@@ -4306,6 +4439,10 @@ app.post('/api/sales', requireAuth, requireBranchWrite((req) => req.body?.branch
     let salesPersonId = data.salesPersonId ?? null;
     let salesPersonName = data.salesPersonName ?? null;
     if (data.status === 'completed') {
+      const totalsError = checkSaleTotals(data);
+      if (totalsError) {
+        return res.status(400).json({ error: totalsError });
+      }
       if (!salesPersonId) {
         return res.status(400).json({ error: 'Salesperson PIN required to complete sale' });
       }
@@ -4346,6 +4483,9 @@ app.post('/api/sales', requireAuth, requireBranchWrite((req) => req.body?.branch
           },
         });
       }
+      if (data.status === 'completed') {
+        await applyLoyaltyForSale(tx, id, data);
+      }
       return created;
     });
 
@@ -4360,6 +4500,9 @@ app.post('/api/sales', requireAuth, requireBranchWrite((req) => req.body?.branch
   } catch (error) {
     if (error instanceof InsufficientStockError) {
       return res.status(409).json({ error: error.message });
+    }
+    if (error instanceof LoyaltyError) {
+      return res.status(400).json({ error: error.message });
     }
     if ((error as { code?: string }).code === 'P2002') {
       return res.status(409).json({ error: 'Invoice number already exists' });
@@ -4410,6 +4553,14 @@ app.patch('/api/sales/:id', requireAuth, async (req, res) => {
           },
         });
       }
+      if (becomingCompleted) {
+        await applyLoyaltyForSale(tx, tId, {
+          customerId: updated.customerId,
+          totalAmount: updated.totalAmount,
+          loyaltyPointsEarned: updated.loyaltyPointsEarned,
+          loyaltyPointsRedeemed: updated.loyaltyPointsRedeemed,
+        });
+      }
       return updated;
     });
 
@@ -4424,6 +4575,9 @@ app.patch('/api/sales/:id', requireAuth, async (req, res) => {
   } catch (error) {
     if (error instanceof InsufficientStockError) {
       return res.status(409).json({ error: error.message });
+    }
+    if (error instanceof LoyaltyError) {
+      return res.status(400).json({ error: error.message });
     }
     return sendParseError(res, error);
   }
@@ -5227,6 +5381,9 @@ app.post('/api/purchases', requireAuth, requireRole('superadmin', 'owner', 'mana
     const data = purchaseCreateSchema.parse(req.body);
     const id = tenantId(req);
 
+    const totalsError = checkPurchaseTotals(data);
+    if (totalsError) return res.status(400).json({ error: totalsError });
+
     const result = await prisma.$transaction(async (tx) => {
       const row = await tx.purchase.create({ data: { ...data, tenantId: id } as never });
 
@@ -5392,9 +5549,27 @@ app.delete('/api/expenses/:id', requireAuth, requireRole('superadmin', 'owner', 
   res.json({ ok: true });
 });
 
+// SECURITY: previously spread `...req.body` straight into the create with no
+// validation — any authenticated user could forge journal rows (fake income to
+// inflate reports) and set `createdBy` to impersonate someone. Now we allow-list
+// the fields, and force `tenantId` + `createdBy` from the authenticated session.
+const ledgerEntrySchema = z.object({
+  type: z.enum(['income', 'expense', 'payable', 'receivable']),
+  amount: z.number().finite(),
+  referenceId: z.string().max(100).optional().nullable(),
+  referenceType: z.string().max(50).optional().nullable(),
+  description: z.string().max(500).optional().nullable(),
+});
 app.post('/api/ledger-entries', requireAuth, async (req, res) => {
-  const row = await prisma.ledgerEntry.create({ data: { ...req.body, tenantId: tenantId(req) } });
-  res.status(201).json(serialize.ledgerEntry(row));
+  try {
+    const data = ledgerEntrySchema.parse(req.body);
+    const row = await prisma.ledgerEntry.create({
+      data: { ...data, tenantId: tenantId(req), createdBy: req.auth!.userId } as never,
+    });
+    res.status(201).json(serialize.ledgerEntry(row));
+  } catch (error) {
+    return sendParseError(res, error);
+  }
 });
 
 app.get('/api/web/orders', requireAuth, async (req, res) => {
@@ -5415,7 +5590,7 @@ const signupSchema = z.object({
   phone: z.string().trim().min(7).max(20),
 });
 
-app.post('/api/auth/signup', async (req, res) => {
+app.post('/api/auth/signup', authLimiter, async (req, res) => {
   try {
     const data = signupSchema.parse(req.body);
     const slug = data.pharmacyName
@@ -5499,7 +5674,7 @@ const setupPasswordSchema = z.object({
 
 const forgotPasswordSchema = z.object({ email: z.string().trim().email() });
 
-app.post('/api/auth/forgot-password', async (req, res) => {
+app.post('/api/auth/forgot-password', authLimiter, async (req, res) => {
   try {
     const { email } = forgotPasswordSchema.parse(req.body);
     const user = await prisma.user.findFirst({
@@ -5522,7 +5697,7 @@ app.post('/api/auth/forgot-password', async (req, res) => {
   }
 });
 
-app.post('/api/auth/setup-password', async (req, res) => {
+app.post('/api/auth/setup-password', authLimiter, async (req, res) => {
   try {
     const data = setupPasswordSchema.parse(req.body);
     const user = await prisma.user.findFirst({

@@ -59,6 +59,8 @@
     "dotenv": "^17.4.2",
     "embla-carousel-react": "^8.6.0",
     "express": "^5.2.1",
+    "express-rate-limit": "^7.5.1",
+    "helmet": "^8.2.0",
     "input-otp": "^1.4.2",
     "jsbarcode": "^3.12.3",
     "jsonwebtoken": "^9.0.3",

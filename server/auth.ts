@@ -2,7 +2,19 @@ import type { NextFunction, Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
 import { prisma } from './prisma.js';
 
-const fallbackSecret = 'dev-only-change-me';
+// SECURITY: no hardcoded fallback. A weak/known signing secret means anyone can
+// forge a token for any { userId, tenantId, role } and take over every tenant.
+// We fail closed: the secret MUST come from the environment, and short/empty
+// secrets are rejected at module load so the process never starts unsafely.
+const JWT_SECRET = process.env.JWT_SECRET ?? '';
+if (!JWT_SECRET || JWT_SECRET.length < 32) {
+  throw new Error(
+    'JWT_SECRET is missing or too short (need ≥32 chars). Refusing to start with a weak/forgeable signing key.',
+  );
+}
+// Pin the algorithm on both sign and verify to prevent algorithm-confusion
+// (e.g. an attacker presenting an "alg":"none" or RS256-vs-HS256 mismatched token).
+const JWT_ALG = 'HS256' as const;
 
 export interface AuthContext {
   userId: string;
@@ -19,7 +31,7 @@ declare global {
 }
 
 export function signToken(payload: AuthContext): string {
-  return jwt.sign(payload, process.env.JWT_SECRET || fallbackSecret, { expiresIn: '12h' });
+  return jwt.sign(payload, JWT_SECRET, { algorithm: JWT_ALG, expiresIn: '12h' });
 }
 
 export async function requireAuth(req: Request, res: Response, next: NextFunction) {
@@ -31,7 +43,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
   }
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || fallbackSecret) as AuthContext;
+    const decoded = jwt.verify(token, JWT_SECRET, { algorithms: [JWT_ALG] }) as AuthContext;
     const user = await prisma.user.findFirst({
       where: {
         id: decoded.userId,
@@ -39,14 +51,17 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
         isActive: true,
         tenant: { isActive: true },
       },
-      select: { id: true },
+      select: { id: true, role: true },
     });
 
     if (!user) {
       return res.status(401).json({ error: 'Invalid session' });
     }
 
-    req.auth = decoded;
+    // Trust the CURRENT role from the DB, not the (up to 12h old) token claim —
+    // so demoting/changing a user's role takes effect immediately rather than
+    // letting them keep elevated privileges until their token expires.
+    req.auth = { ...decoded, role: user.role };
     return next();
   } catch {
     return res.status(401).json({ error: 'Invalid bearer token' });

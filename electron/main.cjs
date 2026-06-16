@@ -11,6 +11,25 @@ const path = require('path');
 
 const APP_URL = process.env.KYNEX_APP_URL || 'https://pos.kynexsolutions.com';
 
+// SECURITY: the desktop shell loads REMOTE content, so it runs with whatever JS
+// that origin serves. Lock the app to exactly one HTTPS origin. If someone points
+// KYNEX_APP_URL somewhere unexpected, only an explicit localhost (dev) or https
+// URL is honoured — never plain http to an arbitrary host.
+const APP_ORIGIN = (() => {
+  try { return new URL(APP_URL).origin; } catch { return 'https://pos.kynexsolutions.com'; }
+})();
+function isAllowedUrl(target) {
+  try {
+    const u = new URL(target);
+    if (u.origin === APP_ORIGIN) return true;
+    // Allow localhost during development only.
+    if ((u.hostname === 'localhost' || u.hostname === '127.0.0.1')) return true;
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 let win = null;
 let splash = null;
 
@@ -65,7 +84,9 @@ function buildMenu() {
       submenu: [
         { role: 'reload', accelerator: 'CmdOrCtrl+R' },
         { role: 'forceReload' },
-        { role: 'toggleDevTools' },
+        // SECURITY: DevTools exposes the in-page session token / localStorage to
+        // anyone at the terminal — only expose it in unpackaged/dev builds.
+        ...(!app.isPackaged ? [{ role: 'toggleDevTools' }] : []),
         { type: 'separator' },
         { label: 'Print', accelerator: 'CmdOrCtrl+P', click: () => win && win.webContents.print() },
         { role: 'togglefullscreen' },
@@ -94,6 +115,8 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,          // run the renderer in an OS sandbox
+      webSecurity: true,      // keep same-origin policy enforced (explicit)
     },
   });
   // Go straight to the login page (skip the marketing landing). The SPA bundle
@@ -114,25 +137,55 @@ function createWindow() {
   setTimeout(reveal, 15000);                    // hard fallback if the network stalls
 
   // The receipt printer opens a popup via window.open('') → about:blank, and our
-  // app navigates within APP_URL — both must be ALLOWED as in-app windows. Only
-  // genuine external links (http/https/mailto/tel/wa.me) go to the OS browser.
+  // app navigates within APP_URL — both are ALLOWED as in-app windows. External
+  // links (http/https/mailto/tel/wa.me) go to the OS browser. Everything else —
+  // including data:/blob: popups, which can run arbitrary scriptable content in
+  // an opener-controlled window — is DENIED.
   win.webContents.setWindowOpenHandler(({ url }) => {
-    if (!url || url === 'about:blank' || url.startsWith(APP_URL) || url.startsWith('blob:') || url.startsWith('data:')) {
+    if (!url || url === 'about:blank' || isAllowedUrl(url)) {
       return { action: 'allow' };
     }
-    if (/^(https?|mailto|tel|wa):/i.test(url) || url.startsWith('https://wa.me')) {
+    if (/^(https?|mailto|tel):/i.test(url)) {
       shell.openExternal(url);
       return { action: 'deny' };
     }
-    return { action: 'allow' };
+    return { action: 'deny' };
   });
 
+  // SECURITY: navigation lockdown. Prevent the privileged main window from being
+  // navigated away from our origin (via a link, JS redirect, or injected
+  // location change) to an attacker page that would then run inside the desktop
+  // shell with the persisted session. about:blank (print popup) is permitted.
+  const blockOffOrigin = (e, url) => {
+    if (url === 'about:blank' || isAllowedUrl(url)) return;
+    e.preventDefault();
+    if (/^https?:/i.test(url)) shell.openExternal(url);
+  };
+  win.webContents.on('will-navigate', blockOffOrigin);
+  win.webContents.on('will-redirect', blockOffOrigin);
+
   // Give popup windows (the print receipt window) a normal frame so the user can
-  // see/close them, and let them print.
+  // see/close them, and let them print. Also deny any embedded <webview>.
   win.webContents.on('did-create-window', (child) => {
     child.setMenu(null);
+    child.webContents.on('will-navigate', blockOffOrigin);
   });
+  win.webContents.on('will-attach-webview', (e) => e.preventDefault());
 }
+
+// SECURITY: never silently accept an invalid TLS certificate. This is Electron's
+// default, but we make it explicit so a MITM (rogue CA / hijacked network) can't
+// feed the desktop app attacker content under our origin.
+app.on('certificate-error', (event, _wc, _url, _error, _cert, callback) => {
+  event.preventDefault();
+  callback(false);
+});
+
+// Defense-in-depth: block creation of any webContents that would navigate or
+// attach off-origin, regardless of which window opened it.
+app.on('web-contents-created', (_e, contents) => {
+  contents.on('will-attach-webview', (e) => e.preventDefault());
+});
 
 app.whenReady().then(() => {
   buildMenu();

@@ -66,6 +66,13 @@ import type { PaymentMethod, Sale, SaleReturn } from '@/types';
 import { openDataUrlInNewTab } from '@/lib/openImage';
 import { useTranslation } from '@/hooks/useTranslation';
 
+// SECURITY: escape any value interpolated into the receipt HTML we build and feed
+// to a same-origin print window. Without this, a medicine name / customer name /
+// return reason containing markup (e.g. <img onerror=...>) would execute JS with
+// the app's origin and could exfiltrate the session token.
+const esc = (s: unknown): string =>
+  String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c] as string));
+
 export function Sales() {
   const { settings } = useSettingsStore();
   const { t, isRTL } = useTranslation();
@@ -180,7 +187,7 @@ export function Sales() {
     if (!w) { toast.error(t('sales.popupBlocked')); return; }
     const rows = saleReturn.items.map((item) => `
       <tr>
-        <td style="padding:4px 2px;font-size:12px">${item.medicineName || getMedicineName(item.medicineId)}</td>
+        <td style="padding:4px 2px;font-size:12px">${esc(item.medicineName || getMedicineName(item.medicineId))}</td>
         <td style="padding:4px 2px;font-size:12px;text-align:center">${item.quantity}</td>
         <td style="padding:4px 2px;font-size:12px;text-align:right">Rs.${item.total.toFixed(2)}</td>
       </tr>`).join('');
@@ -189,14 +196,14 @@ export function Sales() {
       h2,h3{margin:4px 0;text-align:center}hr{border:none;border-top:1px dashed #000}
       table{width:100%;border-collapse:collapse}th{font-size:11px;border-bottom:1px solid #000;padding:4px 2px}
       .right{text-align:right}.center{text-align:center}.bold{font-weight:bold}</style></head><body onload="window.print()">
-      <h2>${settings.companyName}</h2>
+      <h2>${esc(settings.companyName)}</h2>
       <h3>RETURN RECEIPT</h3>
-      <p class="center" style="font-size:11px;margin:2px 0">${settings.companyAddress}<br>${settings.companyPhone}</p>
+      <p class="center" style="font-size:11px;margin:2px 0">${esc(settings.companyAddress)}<br>${esc(settings.companyPhone)}</p>
       <hr/>
-      <p style="font-size:12px"><strong>Return #:</strong> ${saleReturn.returnNumber}<br/>
-      <strong>Original Invoice:</strong> ${sale.invoiceNumber}<br/>
+      <p style="font-size:12px"><strong>Return #:</strong> ${esc(saleReturn.returnNumber)}<br/>
+      <strong>Original Invoice:</strong> ${esc(sale.invoiceNumber)}<br/>
       <strong>Date:</strong> ${new Date(saleReturn.returnDate).toLocaleString('en-PK')}<br/>
-      <strong>Customer:</strong> ${sale.customerName || t('common.walkIn')}</p>
+      <strong>Customer:</strong> ${esc(sale.customerName || t('common.walkIn'))}</p>
       <hr/>
       <table><thead><tr><th style="text-align:left">Item</th><th>Qty</th><th style="text-align:right">Refund</th></tr></thead>
       <tbody>${rows}</tbody></table>
@@ -205,7 +212,7 @@ export function Sales() {
         <tr class="bold" style="font-size:14px"><td>Refund Total</td><td class="right">Rs.${saleReturn.totalAmount.toFixed(2)}</td></tr>
       </table>
       <hr/>
-      <p class="center" style="font-size:11px">Refund: ${saleReturn.refundMethod.method}<br/>Reason: ${saleReturn.reason}<br/>Inventory Restocked: ${saleReturn.restockInventory ? 'Yes' : 'No'}</p>
+      <p class="center" style="font-size:11px">Refund: ${esc(saleReturn.refundMethod.method)}<br/>Reason: ${esc(saleReturn.reason)}<br/>Inventory Restocked: ${saleReturn.restockInventory ? 'Yes' : 'No'}</p>
       ${saleReturn.fbrStatus && saleReturn.fbrStatus !== 'not_required' ? `<p class="center" style="font-size:11px">FBR Credit Note: ${saleReturn.fbrStatus}</p>` : ''}
       </body></html>`);
     w.document.close();
@@ -278,7 +285,7 @@ export function Sales() {
     if (!w) { toast.error(t('sales.popupBlocked')); return; }
     const rows = sale.items.map(item => `
       <tr>
-        <td style="padding:4px 2px;font-size:12px">${getMedicineName(item.medicineId)}</td>
+        <td style="padding:4px 2px;font-size:12px">${esc(getMedicineName(item.medicineId))}</td>
         <td style="padding:4px 2px;font-size:12px;text-align:center">${item.quantity}</td>
         <td style="padding:4px 2px;font-size:12px;text-align:right">Rs.${item.total.toFixed(2)}</td>
       </tr>`).join('');
@@ -288,12 +295,12 @@ export function Sales() {
       table{width:100%;border-collapse:collapse}th{font-size:11px;border-bottom:1px solid #000;padding:4px 2px}
       .right{text-align:right}.center{text-align:center}.bold{font-weight:bold}
       </style></head><body onload="window.print()">
-      <h2>${settings.companyName}</h2>
-      <p class="center" style="font-size:11px;margin:2px 0">${settings.companyAddress}<br>${settings.companyPhone}</p>
+      <h2>${esc(settings.companyName)}</h2>
+      <p class="center" style="font-size:11px;margin:2px 0">${esc(settings.companyAddress)}<br>${esc(settings.companyPhone)}</p>
       <hr/>
-      <p style="font-size:12px"><strong>${t('sales.invoiceNo')}:</strong> ${sale.invoiceNumber}<br/>
+      <p style="font-size:12px"><strong>${t('sales.invoiceNo')}:</strong> ${esc(sale.invoiceNumber)}<br/>
       <strong>${t('common.date')}:</strong> ${new Date(sale.saleDate).toLocaleString('en-PK')}<br/>
-      <strong>${t('sales.customer')}:</strong> ${sale.customerName || t('common.walkIn')}</p>
+      <strong>${t('sales.customer')}:</strong> ${esc(sale.customerName || t('common.walkIn'))}</p>
       <hr/>
       <table><thead><tr><th style="text-align:left">${t('common.items')}</th><th>${t('sales.qty')}</th><th style="text-align:right">${t('common.total')}</th></tr></thead>
       <tbody>${rows}</tbody></table>
@@ -305,8 +312,8 @@ export function Sales() {
         <tr class="bold" style="font-size:14px"><td>${t('common.total')}</td><td class="right">Rs.${sale.totalAmount.toFixed(2)}</td></tr>
       </table>
       <hr/>
-      <p class="center" style="font-size:11px">${t('sales.paymentMethod')}: ${sale.paymentMethods.map(p => p.method).join(', ') || t('sales.pending')}<br/>
-      ${t('common.status')}: ${sale.status}</p>
+      <p class="center" style="font-size:11px">${t('sales.paymentMethod')}: ${esc(sale.paymentMethods.map(p => p.method).join(', ')) || t('sales.pending')}<br/>
+      ${t('common.status')}: ${esc(sale.status)}</p>
       <p class="center" style="font-size:10px;margin-top:10px">${t('pos.thankYou')}</p>
       </body></html>`);
     w.document.close();
