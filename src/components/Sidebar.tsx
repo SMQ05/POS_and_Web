@@ -59,8 +59,6 @@ const menuItems = [
   { icon: Share2, labelKey: 'nav.network', path: '/network', module: 'suppliers', group: 'management', ownerManagerOnly: true },
   { icon: AlertTriangle, labelKey: 'nav.alerts', path: '/alerts', module: 'alerts', group: 'management' },
   { icon: BarChart3, labelKey: 'nav.reports', path: '/reports', module: 'reports', group: 'management' },
-  { icon: BookOpen, labelKey: 'nav.ledger', path: '/ledger', module: 'reports', group: 'management' },
-  { icon: ClipboardList, labelKey: 'nav.audit', path: '/audit', module: 'reports', group: 'management', ownerManagerOnly: true },
   { icon: ClipboardCheck, labelKey: 'nav.reconcile', path: '/reconcile', module: 'inventory', group: 'management' },
   { icon: ClipboardCheck, labelKey: 'nav.dayClose', path: '/day-close', module: 'reports', group: 'management', ownerManagerOnly: true },
   { icon: InboxIcon, labelKey: 'nav.inbox', path: '/inbox', module: 'reports', group: 'management' },

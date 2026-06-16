@@ -101,6 +101,8 @@ import {
   type ReportFilters,
 } from '@/lib/reports/engine';
 import { renderReportToPDF, renderReportToCSV } from '@/lib/reports/render';
+import { Ledger } from '@/pages/Ledger';
+import { Audit } from '@/pages/Audit';
 
 // Map icon name strings (kept in the registry) to actual Lucide components.
 // Lets us add a report without touching this file.
@@ -188,6 +190,14 @@ export function Reports() {
     || (currentUser?.role === 'manager' && settings.managerCanSeeProfit)
     || currentUser?.role === 'accountant';
 
+  // Item 1 — Reports / Ledger / Audit unified into one page.
+  const canAudit = ['owner', 'manager', 'superadmin'].includes(currentUser?.role ?? '');
+  const [topView, setTopView] = useState<'reports' | 'ledger' | 'audit'>('reports');
+  const topTabs: Array<{ k: 'reports' | 'ledger' | 'audit'; label: string }> = [
+    { k: 'reports', label: 'Reports' },
+    { k: 'ledger', label: 'Ledger' },
+    ...(canAudit ? [{ k: 'audit' as const, label: 'Audit' }] : []),
+  ];
   const [rangeKey, setRangeKey] = useState<DateRangeKey>('month');
   const [category, setCategory] = useState<ReportCategory>('sales');
   const [searchQuery, setSearchQuery] = useState('');
@@ -348,6 +358,22 @@ export function Reports() {
 
   return (
     <div dir={isRTL ? 'rtl' : 'ltr'} className="space-y-5">
+      {/* Item 1 — Reports / Ledger / Audit unified switcher */}
+      <div className="inline-flex rounded-lg border p-0.5 bg-gray-50 dark:bg-gray-800/40">
+        {topTabs.map(({ k, label }) => (
+          <button
+            key={k}
+            onClick={() => setTopView(k)}
+            className={cn('px-4 py-1.5 text-sm rounded-md transition-colors',
+              topView === k ? 'bg-white dark:bg-gray-700 shadow font-medium' : 'text-gray-500 hover:text-gray-700')}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {topView === 'ledger' ? <Ledger /> : (topView === 'audit' && canAudit) ? <Audit /> : (
+      <>
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-3">
         <div>
@@ -650,6 +676,8 @@ export function Reports() {
           )}
         </DialogContent>
       </Dialog>
+      </>
+      )}
     </div>
   );
 }
