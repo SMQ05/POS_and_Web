@@ -6,10 +6,17 @@ const RESEND_API_KEY = process.env.RESEND_API_KEY ?? '';
 const FROM_ADDRESS = process.env.EMAIL_FROM ?? 'Kynex Pharmacloud <onboarding@resend.dev>';
 const APP_URL = process.env.APP_URL ?? 'https://pos.kynexsolutions.com';
 
+/** A file attachment. `content` is base64-encoded bytes (Resend's format). */
+export interface EmailAttachment {
+  filename: string;
+  content: string; // base64
+}
+
 interface SendOptions {
   to: string;
   subject: string;
   html: string;
+  attachments?: EmailAttachment[];
 }
 
 export async function sendEmail(opts: SendOptions): Promise<void> {
@@ -28,6 +35,7 @@ export async function sendEmail(opts: SendOptions): Promise<void> {
       to: [opts.to],
       subject: opts.subject,
       html: opts.html,
+      ...(opts.attachments?.length ? { attachments: opts.attachments } : {}),
     }),
   });
   if (!res.ok) {
