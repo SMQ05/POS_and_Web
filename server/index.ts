@@ -145,7 +145,9 @@ const adminResetPinSchema = z.object({
 });
 
 const verifyPinSchema = z.object({
-  username: z.string().trim().min(1).max(40),
+  // Username is optional — code-only mode (item 7) identifies the salesperson by
+  // PIN alone (PINs are enforced unique per tenant at set time).
+  username: z.string().trim().min(1).max(40).optional(),
   pin: z.string().regex(salesPinPattern),
 });
 
@@ -1485,6 +1487,9 @@ app.post('/api/users', requireAuth, requireRole('superadmin', 'owner', 'manager'
     // and only when both username + PIN are supplied. PIN is stored hashed.
     const canPos = SALES_ROLES.has(data.role);
     const salesUsername = canPos && data.salesUsername ? data.salesUsername : undefined;
+    if (canPos && data.salesPin && await pinTaken(tenantId(req), data.salesPin)) {
+      return res.status(409).json({ error: 'That sales PIN is already used by another staff member — pick a different one.' });
+    }
     const salesPinHash = canPos && data.salesPin ? await bcrypt.hash(data.salesPin, 10) : undefined;
     const user = await prisma.user.create({
       data: {
@@ -1630,6 +1635,9 @@ app.patch('/api/users/me/sales-pin', requireAuth, async (req, res) => {
     if (!proven) {
       return res.status(401).json({ error: 'Current password or PIN is required and must match' });
     }
+    if (await pinTaken(tenantId(req), data.pin, user.id)) {
+      return res.status(409).json({ error: 'That sales PIN is already used by another staff member — pick a different one.' });
+    }
 
     const pinHash = await bcrypt.hash(data.pin, 10);
     try {
@@ -1664,6 +1672,9 @@ app.patch('/api/users/:id/sales-pin/reset', requireAuth, requireRole('superadmin
     }
     if (req.auth?.role === 'manager' && !['cashier', 'salesman'].includes(user.role)) {
       return res.status(403).json({ error: 'Managers can only reset PINs for cashiers and salesmen' });
+    }
+    if (await pinTaken(tId, data.pin, user.id)) {
+      return res.status(409).json({ error: 'That sales PIN is already used by another staff member — pick a different one.' });
     }
     const pinHash = await bcrypt.hash(data.pin, 10);
     try {
@@ -1703,24 +1714,54 @@ app.post('/api/sales/verify-pin', requireAuth, async (req, res) => {
     if (recordPinAttempt(rateKey).blocked) {
       return res.status(429).json({ error: 'Too many attempts. Wait a minute and try again.' });
     }
-    const user = await prisma.user.findFirst({
-      where: {
-        tenantId: tId,
-        salesUsername: data.username,
-        isActive: true,
-      },
+    if (data.username) {
+      // Legacy path: username + PIN.
+      const user = await prisma.user.findFirst({
+        where: { tenantId: tId, salesUsername: data.username, isActive: true },
+        select: { id: true, name: true, role: true, salesPinHash: true },
+      });
+      if (!user || !user.salesPinHash || !SALES_ROLES.has(user.role)) {
+        return res.status(401).json({ error: 'Unknown username or PIN' });
+      }
+      const ok = await bcrypt.compare(data.pin, user.salesPinHash);
+      if (!ok) return res.status(401).json({ error: 'Unknown username or PIN' });
+      return res.json({ userId: user.id, name: user.name, role: user.role });
+    }
+    // Code-only path (item 7): find the salesperson by PIN alone. PINs are unique
+    // per tenant, so at most one matches; compare against each active sales user.
+    const candidates = await prisma.user.findMany({
+      where: { tenantId: tId, isActive: true, salesPinHash: { not: null } },
       select: { id: true, name: true, role: true, salesPinHash: true },
     });
-    if (!user || !user.salesPinHash || !SALES_ROLES.has(user.role)) {
-      return res.status(401).json({ error: 'Unknown username or PIN' });
+    for (const u of candidates) {
+      if (!SALES_ROLES.has(u.role) || !u.salesPinHash) continue;
+      if (await bcrypt.compare(data.pin, u.salesPinHash)) {
+        return res.json({ userId: u.id, name: u.name, role: u.role });
+      }
     }
-    const ok = await bcrypt.compare(data.pin, user.salesPinHash);
-    if (!ok) return res.status(401).json({ error: 'Unknown username or PIN' });
-    return res.json({ userId: user.id, name: user.name, role: user.role });
+    return res.status(401).json({ error: 'Invalid code' });
   } catch (error) {
     return sendParseError(res, error);
   }
 });
+
+// Item 7 — code-only receipts identify a salesperson by PIN alone, so PINs must
+// be unique per tenant. True if another active user already uses this PIN.
+async function pinTaken(tId: string, pin: string, excludeUserId?: string): Promise<boolean> {
+  const users = await prisma.user.findMany({
+    where: {
+      tenantId: tId,
+      isActive: true,
+      salesPinHash: { not: null },
+      ...(excludeUserId ? { id: { not: excludeUserId } } : {}),
+    },
+    select: { salesPinHash: true },
+  });
+  for (const u of users) {
+    if (u.salesPinHash && await bcrypt.compare(pin, u.salesPinHash)) return true;
+  }
+  return false;
+}
 
 app.patch('/api/settings', requireAuth, requireRole('superadmin', 'owner', 'manager'), async (req, res) => {
   try {

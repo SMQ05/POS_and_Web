@@ -381,11 +381,9 @@ export function POS() {
   // 4-digit PIN; the sale is recorded under their name even though the POS
   // terminal stays logged in as the pharmacy/owner.
   const [showPinDialog, setShowPinDialog] = useState(false);
-  const [pinUsername, setPinUsername] = useState('');
   const [pinValue, setPinValue] = useState('');
   const [pinError, setPinError] = useState('');
   const [pinSubmitting, setPinSubmitting] = useState(false);
-  const pinUsernameRef = useRef<HTMLInputElement>(null);
   const pinValueRef = useRef<HTMLInputElement>(null);
 
   // Focus search input on mount
@@ -1508,17 +1506,11 @@ export function POS() {
     setPinError('');
     setPinValue('');
     setShowPinDialog(true);
-    setTimeout(() => pinUsernameRef.current?.focus(), 50);
+    setTimeout(() => pinValueRef.current?.focus(), 50);
   };
 
   const submitPin = async () => {
     if (pinSubmitting) return;
-    const username = pinUsername.trim();
-    if (!username) {
-      setPinError(t('pos.pinEnterUsername'));
-      pinUsernameRef.current?.focus();
-      return;
-    }
     if (!/^\d{4}$/.test(pinValue)) {
       setPinError(t('pos.pinMustBe4'));
       pinValueRef.current?.focus();
@@ -1527,9 +1519,9 @@ export function POS() {
     setPinSubmitting(true);
     setPinError('');
     try {
-      const verified = await verifySalesPin(username, pinValue);
+      // Item 7 — code-only: identify the salesperson by PIN alone (no username).
+      const verified = await verifySalesPin(pinValue);
       setShowPinDialog(false);
-      setPinUsername('');
       setPinValue('');
       handleProcessPayment(verified);
     } catch (err) {
@@ -2891,18 +2883,6 @@ export function POS() {
             className="space-y-3 pt-2"
             onSubmit={(e) => { e.preventDefault(); submitPin(); }}
           >
-            <div>
-              <Label htmlFor="pin-username" className="text-xs mb-1 block">{t('pos.pinUsername')}</Label>
-              <Input
-                id="pin-username"
-                ref={pinUsernameRef}
-                value={pinUsername}
-                onChange={(e) => setPinUsername(e.target.value)}
-                autoComplete="off"
-                disabled={pinSubmitting}
-                placeholder="e.g. ahmad"
-              />
-            </div>
             <div>
               <Label htmlFor="pin-value" className="text-xs mb-1 block">{t('pos.pinValue')}</Label>
               <Input

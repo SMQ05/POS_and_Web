@@ -714,10 +714,10 @@ export async function adminClearSalesPin(userId: string): Promise<void> {
   await apiRequest<{ ok: boolean }>(`/users/${userId}/sales-pin`, { method: 'DELETE' });
 }
 
-export async function verifySalesPin(username: string, pin: string): Promise<VerifiedSalesperson> {
+export async function verifySalesPin(pin: string, username?: string): Promise<VerifiedSalesperson> {
   return apiRequest<VerifiedSalesperson>('/sales/verify-pin', {
     method: 'POST',
-    body: JSON.stringify({ username, pin }),
+    body: JSON.stringify(username ? { username, pin } : { pin }),
   });
 }
 
