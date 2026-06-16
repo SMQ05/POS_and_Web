@@ -284,6 +284,13 @@ export function POS() {
       return () => clearTimeout(id);
     }
   }, [showBatchDialog, quickAdd, addStage]);
+
+  // Item 8 — when cashier collection is disabled, every sale is paid at the
+  // terminal: force "seller" so printing marks it paid immediately.
+  const cashierCollectionOn = settings.cashierCollectionEnabled !== false;
+  useEffect(() => {
+    if (!cashierCollectionOn) setPaidBy('seller');
+  }, [cashierCollectionOn]);
   const [showFefoOverrideDialog, setShowFefoOverrideDialog] = useState(false);
   const [showCustomerDialog, setShowCustomerDialog] = useState(false);
   const [showPaymentDialog, setShowPaymentDialog] = useState(false);
@@ -371,6 +378,7 @@ export function POS() {
     fbrBarcode?: string;
     fbrQrPayload?: string;
     salesPersonName?: string;
+    pendingCollection?: boolean;
     loyaltyDiscount?: number;
     loyaltyPointsRedeemed?: number;
     loyaltyPointsEarned?: number;
@@ -1039,6 +1047,21 @@ export function POS() {
         </div>
       `;
     }
+    // Item 8 — pending (collect-at-cashier) sales get a QR linking to the collect
+    // page so the cashier scans the receipt → opens the invoice + payment picker.
+    let collectBlock = '';
+    if (inv?.pendingCollection && inv.invoiceNumber) {
+      const collectUrl = `${window.location.origin}/collect/${encodeURIComponent(inv.invoiceNumber)}`;
+      const collectQr = renderToStaticMarkup(<QRCodeSVG value={collectUrl} size={160} level="M" includeMargin={false} />);
+      collectBlock = `
+        <div class="line"></div>
+        <div style="text-align:center">
+          <p style="font-size:12px;font-weight:bold;margin:2px 0">PAYMENT PENDING — PAY AT CASHIER</p>
+          <div style="display:inline-block">${collectQr}</div>
+          <p style="font-size:10px;margin:2px 0">Scan to collect · ${inv.invoiceNumber}</p>
+        </div>
+      `;
+    }
     // Read everything from the post-sale snapshot so the receipt prints
     // correctly even after the cart has been cleared for the next customer.
     const snap = lastSaleRef.current;
@@ -1161,6 +1184,7 @@ export function POS() {
         <div class="line"></div>
         <div class="row bold"><span>${t('pos.grandTotal')}:</span><span>Rs. ${snapTotal.toFixed(2)}</span></div>
         ${snapCustomerName && (snapLoyaltyEarned > 0 || snapLoyaltyRedeemed > 0) ? `<div class="row"><span>Points earned:</span><span>+${snapLoyaltyEarned}${snapLoyaltyBalance != null ? ` (bal ${snapLoyaltyBalance})` : ''}</span></div>` : ''}
+        ${collectBlock}
         ${fbrBlock}
         <div class="line"></div>
         <p class="center">${esc(settings.receiptFooterText || t('pos.thankYou'))}</p>
@@ -1418,6 +1442,7 @@ export function POS() {
       fbrBarcode: fbrReceiptInfo.fbrBarcode,
       fbrQrPayload: fbrReceiptInfo.fbrQrPayload,
       salesPersonName: salesperson?.name,
+      pendingCollection: paidBy === 'cashier',
       loyaltyDiscount,
       loyaltyPointsRedeemed: redeemPoints,
       loyaltyPointsEarned: loyaltyPointsEarnedVal,
@@ -2785,7 +2810,8 @@ export function POS() {
 
             <Separator />
 
-            {/* Collect By — Cashier or Seller */}
+            {/* Collect By — Cashier or Seller (hidden when cashier collection is off) */}
+            {cashierCollectionOn && (
             <div className="space-y-2">
               <Label className="text-sm font-semibold">{t('pos.collectBy')}</Label>
               <RadioGroup
@@ -2821,6 +2847,7 @@ export function POS() {
                 <p className="text-xs text-emerald-600 bg-emerald-50 rounded-md px-2 py-1">{t('pos.sellerNote')}</p>
               )}
             </div>
+            )}
 
             {/* M2 — payment-method default adjustment summary. Shown only when
                 an adjustment applies so the cashier knows the final number to

@@ -1096,6 +1096,10 @@ export interface AppSettings {
   // When true, expose the /day-close page so a manager can run a Z-report
   // close at end of business.
   dayCloseEnabled?: boolean;
+  // Item 8 — when false, the "collect by cashier" (deferred) option is hidden;
+  // sales are marked paid as soon as the receipt prints (seller collected at POS).
+  // Defaults to enabled (undefined === true) to preserve existing behaviour.
+  cashierCollectionEnabled?: boolean;
   // ── Auto-PO (M7) ──
   // When true, the auto-PO worker is allowed to draft purchase orders from
   // low-stock medicines. Owner reviews + confirms before sending.

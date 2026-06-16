@@ -931,6 +931,19 @@ export function Settings() {
                     }
                   />
                 </div>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="font-medium">Cashier collection (pay later at counter)</p>
+                    <p className="text-xs text-gray-500">
+                      When on, a sale can be sent to a cashier — the receipt prints a QR the cashier scans to
+                      collect payment. When off, every sale is marked paid as soon as the receipt prints.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={settings.cashierCollectionEnabled !== false}
+                    onCheckedChange={(checked) => updateSettings({ cashierCollectionEnabled: checked })}
+                  />
+                </div>
               </CardContent>
             </Card>
           )}
