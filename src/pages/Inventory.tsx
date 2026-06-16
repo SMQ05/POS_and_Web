@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useSettingsStore, useInventoryStore, useAuthStore } from '@/store';
+import { useSettingsStore, useInventoryStore, useAuthStore, useSupplierStore } from '@/store';
+import { buildReorderPurchase, primarySupplierId, nextPoNumber } from '@/lib/reorder';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -49,6 +50,7 @@ import {
   Store,
   Edit,
   History,
+  ShoppingCart,
   ShieldAlert,
   Zap,
   Upload,
@@ -87,7 +89,32 @@ export function Inventory() {
     getFEFOBatchesByMedicine,
     getExpiryRiskReport,
   } = useInventoryStore();
-  
+  const { medicineSuppliers, purchases, addPurchase } = useSupplierStore();
+  const { currentUser, activeBranchId } = useAuthStore();
+
+  // Feature 3 — urgent single-medicine reorder: one-click PO to the medicine's
+  // primary supplier for its reorder quantity. Pending qty (existing mechanism)
+  // prevents double-ordering and keeps it in sync with the visit-day batch PO.
+  const handleUrgentOrder = (medicine: any) => {
+    const qty = medicine.reorderQuantity > 0 ? medicine.reorderQuantity : Math.max(1, (medicine.reorderLevel ?? 0) - getMedicineStock(medicine.id));
+    const supplierId = primarySupplierId(medicine.id, medicineSuppliers);
+    if (!supplierId) {
+      toast.info('No supplier mapped — pick one to finish the order.');
+      navigate(`/purchase-orders?medicine=${medicine.id}&qty=${qty}`);
+      return;
+    }
+    addPurchase(buildReorderPurchase({
+      items: [{ medicineId: medicine.id, quantity: qty }],
+      supplierId,
+      branchId: activeBranchId ?? '1',
+      poNumber: nextPoNumber(purchases.length),
+      createdBy: currentUser?.id ?? '1',
+      note: 'Urgent reorder',
+      urgent: true,
+    }));
+    toast.success(`Urgent order placed — ${qty} units of ${medicine.name}.`);
+  };
+
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [stockFilter, setStockFilter] = useState<string>('all');
@@ -499,6 +526,14 @@ export function Inventory() {
                             onClick={() => navigate(`/medicines?id=${medicine.id}`)}
                           >
                             <Edit className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            title="Urgent reorder"
+                            onClick={() => handleUrgentOrder(medicine)}
+                          >
+                            <ShoppingCart className="w-4 h-4 text-amber-600" />
                           </Button>
                         </div>
                       </TableCell>
