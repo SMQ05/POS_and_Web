@@ -3991,12 +3991,19 @@ app.post('/api/reconcile-runs/:id/entries', requireAuth, requireRole('superadmin
     const existing = await prisma.reconcileEntry.findFirst({
       where: { tenantId: tId, runId: run.id, medicineId: data.medicineId, batchId: data.batchId ?? null },
     });
-    const variance = data.countedQty - data.systemQty;
+    // Trust the live batch quantity as systemQty (the client snapshot can be
+    // stale), so the recorded variance matches reality at count time.
+    let systemQty = data.systemQty;
+    if (data.batchId) {
+      const liveBatch = await prisma.batch.findFirst({ where: { id: data.batchId, tenantId: tId }, select: { quantity: true } });
+      if (liveBatch) systemQty = liveBatch.quantity;
+    }
+    const variance = data.countedQty - systemQty;
     const row = existing
       ? await prisma.reconcileEntry.update({
           where: { id: existing.id },
           data: {
-            systemQty: data.systemQty,
+            systemQty,
             countedQty: data.countedQty,
             variance,
             notes: data.notes ?? null,
@@ -4008,7 +4015,7 @@ app.post('/api/reconcile-runs/:id/entries', requireAuth, requireRole('superadmin
             runId: run.id,
             medicineId: data.medicineId,
             batchId: data.batchId ?? null,
-            systemQty: data.systemQty,
+            systemQty,
             countedQty: data.countedQty,
             variance,
             notes: data.notes ?? null,
@@ -4036,16 +4043,19 @@ app.post('/api/reconcile-runs/:id/post', requireAuth, requireRole('superadmin', 
 
     const result = await prisma.$transaction(async (tx) => {
       let valueAdjustment = 0;
+      let skippedNoBatch = 0;
       for (const e of entries) {
         if (e.variance === 0) continue;
-        if (!e.batchId) continue; // medicine-only entries can't be applied directly
+        if (!e.batchId) { skippedNoBatch++; continue; } // medicine-only entries can't be applied to a specific batch
         const batch = await tx.batch.findFirst({ where: { id: e.batchId, tenantId: tId } });
         if (!batch) continue;
-        const newQty = Math.max(0, batch.quantity + e.variance);
+        // The physical count is the source of truth — set the batch to the
+        // counted quantity (don't add the stale variance, which would be wrong if
+        // stock moved between counting and posting). Value impact = the REAL delta
+        // applied now, so the ledger matches what actually changed.
+        const newQty = Math.max(0, e.countedQty);
+        valueAdjustment += (newQty - batch.quantity) * (batch.purchasePrice ?? 0);
         await tx.batch.update({ where: { id: batch.id }, data: { quantity: newQty } });
-        // Variance value = variance * batch.purchasePrice. Positive = found stock
-        // (asset gain), negative = missing stock (asset loss).
-        valueAdjustment += e.variance * (batch.purchasePrice ?? 0);
       }
       const updatedRun = await tx.reconcileRun.update({
         where: { id: run.id },
@@ -4074,7 +4084,7 @@ app.post('/api/reconcile-runs/:id/post', requireAuth, requireRole('superadmin', 
           userName: 'System',
           action: 'RECONCILE_POST',
           module: 'reconcile',
-          details: `Posted reconcile run ${run.id} (${entries.length} entries, net Rs. ${valueAdjustment.toFixed(2)})`,
+          details: `Posted reconcile run ${run.id} (${entries.length} entries, net Rs. ${valueAdjustment.toFixed(2)}${skippedNoBatch ? `, ${skippedNoBatch} medicine-level entr${skippedNoBatch === 1 ? 'y' : 'ies'} skipped — no batch`: ''})`,
         },
       });
       // M5 — notify owners so the stock-take outcome shows up in their bell.

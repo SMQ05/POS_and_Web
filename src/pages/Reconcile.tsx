@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useInventoryStore, useSupplierStore, useSettingsStore } from '@/store';
+import { useInventoryStore, useSupplierStore, useSettingsStore, useAuthStore } from '@/store';
 import {
   fetchReconcileRuns,
   createReconcileRun,
@@ -55,6 +55,7 @@ export function Reconcile() {
   const { settings } = useSettingsStore();
   const { medicines, batches } = useInventoryStore();
   const { suppliers, medicineSuppliers } = useSupplierStore();
+  const { activeBranchId } = useAuthStore();
 
   const [runs, setRuns] = useState<ReconcileRunDTO[]>([]);
   const [activeRun, setActiveRun] = useState<ReconcileRunDTO | null>(null);
@@ -93,6 +94,10 @@ export function Reconcile() {
     return batches.filter((b) => {
       const med = medicines.find((m) => m.id === b.medicineId);
       if (!med || !med.isActive) return false;
+      // Only the active branch's live (non-disposed) batches are countable.
+      if (activeBranchId && b.branchId && b.branchId !== activeBranchId) return false;
+      if (b.isActive === false) return false;
+      if (b.disposition && b.disposition !== 'active') return false;
       switch (activeRun.scope) {
         case 'all': return true;
         case 'category': return activeRun.scopeValue ? med.category === activeRun.scopeValue : true;
@@ -108,7 +113,7 @@ export function Reconcile() {
         default: return true;
       }
     });
-  }, [activeRun, batches, medicines, medicineSuppliers]);
+  }, [activeRun, batches, medicines, medicineSuppliers, activeBranchId]);
 
   const filteredBatches = useMemo(() => {
     if (!search) return scopedBatches;
@@ -153,9 +158,19 @@ export function Reconcile() {
     if (!confirm('Post this run? Batch quantities will be adjusted and a ledger entry written. This cannot be undone.')) return;
     try {
       const updated = await postReconcileRun(activeRun.id);
+      // Bug fix — reflect the posted adjustments in the local inventory cache so
+      // the UI (and every other screen) shows the new quantities immediately
+      // instead of stale ones until a reload. Mirrors the server: each counted
+      // batch becomes its counted qty. setState only — the server already wrote.
+      const counted = new Map(entries.filter((e) => e.batchId && e.variance !== 0).map((e) => [e.batchId as string, Math.max(0, e.countedQty)]));
+      if (counted.size > 0) {
+        useInventoryStore.setState((s) => ({
+          batches: s.batches.map((b) => (counted.has(b.id) ? { ...b, quantity: counted.get(b.id)! } : b)),
+        }));
+      }
       setActiveRun(updated);
       await refreshRuns();
-      toast.success('Reconcile run posted');
+      toast.success('Reconcile run posted — stock adjusted');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to post run');
     }
