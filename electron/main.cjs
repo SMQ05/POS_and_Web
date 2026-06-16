@@ -81,10 +81,24 @@ function createWindow() {
   win.show();
   win.loadURL(APP_URL);
 
-  // Open external links (mailto, wa.me, etc.) in the OS browser, not the app window.
+  // The receipt printer opens a popup via window.open('') → about:blank, and our
+  // app navigates within APP_URL — both must be ALLOWED as in-app windows. Only
+  // genuine external links (http/https/mailto/tel/wa.me) go to the OS browser.
   win.webContents.setWindowOpenHandler(({ url }) => {
-    if (!url.startsWith(APP_URL)) { shell.openExternal(url); return { action: 'deny' }; }
+    if (!url || url === 'about:blank' || url.startsWith(APP_URL) || url.startsWith('blob:') || url.startsWith('data:')) {
+      return { action: 'allow' };
+    }
+    if (/^(https?|mailto|tel|wa):/i.test(url) || url.startsWith('https://wa.me')) {
+      shell.openExternal(url);
+      return { action: 'deny' };
+    }
     return { action: 'allow' };
+  });
+
+  // Give popup windows (the print receipt window) a normal frame so the user can
+  // see/close them, and let them print.
+  win.webContents.on('did-create-window', (child) => {
+    child.setMenu(null);
   });
 }
 

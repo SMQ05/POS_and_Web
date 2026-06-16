@@ -505,6 +505,12 @@ export function POS() {
         return;
       }
     }
+    // Empty search bar + items in cart → Enter proceeds to payment (item 2).
+    if (e.key === 'Enter' && searchResults.length === 0 && (e.currentTarget as HTMLInputElement).value.trim() === '' && cart.length > 0) {
+      e.preventDefault();
+      handlePayClick();
+      return;
+    }
     if (searchResults.length === 0) return;
     if (e.key === 'ArrowDown') {
       e.preventDefault();
@@ -691,7 +697,9 @@ export function POS() {
     scannedUnitRef.current = null;
     setAvailableBatches([]);
     setFefoSuggestedBatchId(null);
-    searchInputRef.current?.focus();
+    // Defer so the dialog's focus-return (Radix) doesn't steal it back — this
+    // puts the cursor back in the search bar to add the next medicine.
+    setTimeout(() => searchInputRef.current?.focus(), 80);
   };
 
   // Handle barcode scan
@@ -1562,9 +1570,9 @@ export function POS() {
   const change = paymentMethod === 'cash' ? (parseFloat(cashReceived) || 0) - payable : 0;
 
   return (
-    <div className="h-[calc(100vh-4rem)] -m-6 flex">
+    <div className="h-[calc(100vh-4rem)] -m-6 flex flex-col lg:flex-row overflow-hidden">
       {/* Left Panel - Product Search & Cart */}
-      <div className="flex-1 flex flex-col p-6">
+      <div className="flex-1 min-w-0 flex flex-col p-6 overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-4">
@@ -2034,7 +2042,7 @@ export function POS() {
                             </p>
                           );
                         })()}
-                        <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-[160px_150px_220px]">
+                        <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                           <div className="space-y-1">
                             <Label className="text-[11px] font-medium text-gray-500">Unit</Label>
                             <Select
@@ -2208,9 +2216,9 @@ export function POS() {
         </Card>
       </div>
 
-      {/* Right Panel - Checkout */}
+      {/* Right Panel - Checkout — full width when stacked (narrow), fixed beside cart on lg+ */}
       <div className={cn(
-        'w-96 border-l p-6 flex flex-col',
+        'w-full lg:w-96 shrink-0 border-t lg:border-t-0 lg:border-l p-6 flex flex-col overflow-y-auto',
         settings.theme === 'dark' ? 'bg-gray-800 border-gray-700' : 'bg-gray-50'
       )}>
         <h2 className={cn(

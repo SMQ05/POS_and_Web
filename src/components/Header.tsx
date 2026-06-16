@@ -119,7 +119,14 @@ export function Header({ onMobileMenuClick }: HeaderProps = {}) {
 
       {/* Right Side Actions */}
       <div className="flex items-center gap-1 sm:gap-3 shrink-0">
-        {/* Branch Selector — switch the branch you're working in */}
+        {/* Branch Selector — only a switcher when there's more than one branch;
+            otherwise a plain label (no point switching a single-branch pharmacy). */}
+        {branches.length <= 1 ? (
+          <span className="hidden sm:flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300 px-2">
+            <Store className="w-4 h-4" />
+            {activeBranch?.name ?? branches[0]?.name ?? t('header.mainBranch')}
+          </span>
+        ) : (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="sm" className="gap-2">
@@ -164,6 +171,7 @@ export function Header({ onMobileMenuClick }: HeaderProps = {}) {
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        )}
 
         {/* Language Toggle */}
         <Button
