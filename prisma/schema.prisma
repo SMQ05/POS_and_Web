@@ -533,6 +533,10 @@ model ShiftSession {
   // the Z-report stays consistent if later sales get edited.
   salesTotal    Float     @default(0)
   returnsTotal  Float     @default(0)
+  // Per-operator cash reconciliation captured at close (Marg-style "Mode of
+  // Payment" tally): { byMethod, cashCollected, expectedCash, difference,
+  // salesCount, returnsCount }. Null on legacy/open shifts.
+  summary       Json?
   status        String    @default("open") // 'open' | 'closed'
   notes         String?   @db.VarChar(500)
   createdAt     DateTime  @default(now())

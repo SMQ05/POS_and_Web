@@ -911,28 +911,24 @@ export function Settings() {
               <CardHeader>
                 <CardTitle>Shift &amp; day-end close</CardTitle>
                 <p className="text-sm text-gray-500 mt-1">
-                  Optional cashier shift sessions and a manager-run end-of-day Z-report.
+                  One unified flow: cashiers open a drawer with a cash float and close it with a counted
+                  amount; the Day Close page reconciles each cashier&apos;s drawer and posts the end-of-day Z-report.
                 </p>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="font-medium">Require shift open before sale</p>
-                    <p className="text-xs text-gray-500">POS will refuse payment until a cashier opens a shift with opening cash.</p>
+                    <p className="font-medium">Enable shift &amp; day-end close</p>
+                    <p className="text-xs text-gray-500">
+                      POS requires an open shift before taking payment, and the Day Close page becomes available
+                      for per-cashier cash reconciliation and the daily Z-report.
+                    </p>
                   </div>
                   <Switch
-                    checked={settings.shiftCloseEnabled ?? false}
-                    onCheckedChange={(checked) => updateSettings({ shiftCloseEnabled: checked })}
-                  />
-                </div>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="font-medium">Enable day-end close</p>
-                    <p className="text-xs text-gray-500">Adds a /day-close page where managers post a Z-report at end of business.</p>
-                  </div>
-                  <Switch
-                    checked={settings.dayCloseEnabled ?? false}
-                    onCheckedChange={(checked) => updateSettings({ dayCloseEnabled: checked })}
+                    checked={(settings.dayCloseEnabled ?? false) || (settings.shiftCloseEnabled ?? false)}
+                    onCheckedChange={(checked) =>
+                      updateSettings({ shiftCloseEnabled: checked, dayCloseEnabled: checked })
+                    }
                   />
                 </div>
               </CardContent>

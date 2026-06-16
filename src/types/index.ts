@@ -90,6 +90,18 @@ export interface UserBranchAccess {
 }
 
 // M6 — Shift session at the POS terminal.
+// Per-operator cash reconciliation captured when a shift is closed.
+// `difference` = counted closing cash − expected cash (positive = drawer over,
+// negative = short). `byMethod` is gross sales split by payment method.
+export interface ShiftSummary {
+  byMethod: Record<string, number>;
+  cashCollected: number;
+  expectedCash: number;
+  difference: number;
+  salesCount: number;
+  returnsCount: number;
+}
+
 export interface ShiftSession {
   id: string;
   branchId: string;
@@ -101,6 +113,7 @@ export interface ShiftSession {
   closingCash?: number;
   salesTotal: number;
   returnsTotal: number;
+  summary?: ShiftSummary;
   status: 'open' | 'closed';
   notes?: string;
 }

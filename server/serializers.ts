@@ -41,6 +41,7 @@ export function shiftSession(row: any) {
     closingCash: row.closingCash ?? undefined,
     salesTotal: row.salesTotal,
     returnsTotal: row.returnsTotal,
+    summary: row.summary ?? undefined,
     status: row.status,
     notes: row.notes ?? undefined,
   };

@@ -15,6 +15,8 @@ import { prisma, dbUrlInfo } from './prisma.js';
 import { lookupByGtin, searchCatalog, contributeFromMedicine, upsertProduct } from './catalog.js';
 import { isKxv2, decryptKxv2 } from './secureExport.js';
 import { getDrapProduct, searchDrapCandidates } from './drap.js';
+import { computeShiftSummary } from './shiftSummary.js';
+import type { Prisma } from '@prisma/client';
 import { startImport, pauseImport, resumeImport, importStatus, resumeImportOnBoot } from './drapImport.js';
 import { requireAuth, requireRole, signToken } from './auth.js';
 import * as serialize from './serializers.js';
@@ -2679,7 +2681,7 @@ app.post('/api/shift-sessions/:id/close', requireAuth, async (req, res) => {
           saleDate: { gte: since, lte: until },
           status: { in: ['completed', 'partial_returned'] },
         },
-        select: { totalAmount: true },
+        select: { totalAmount: true, paymentMethods: true },
       }),
       prisma.saleReturn.findMany({
         where: {
@@ -2687,11 +2689,21 @@ app.post('/api/shift-sessions/:id/close', requireAuth, async (req, res) => {
           returnDate: { gte: since, lte: until },
           createdBy: session.userId,
         },
-        select: { totalAmount: true },
+        select: { totalAmount: true, refundMethod: true },
       }),
     ]);
     const salesTotal = sales.reduce((s, x) => s + (x.totalAmount ?? 0), 0);
     const returnsTotal = returns.reduce((s, x) => s + (x.totalAmount ?? 0), 0);
+
+    // Per-operator cash reconciliation (Marg "Mode of Payment" tally).
+    const summary = computeShiftSummary({
+      openingCash: session.openingCash,
+      closingCash: data.closingCash,
+      sales,
+      returns,
+    });
+    const { difference } = summary;
+
     const updated = await prisma.shiftSession.update({
       where: { id: session.id },
       data: {
@@ -2699,6 +2711,7 @@ app.post('/api/shift-sessions/:id/close', requireAuth, async (req, res) => {
         closingCash: data.closingCash,
         salesTotal,
         returnsTotal,
+        summary: summary as unknown as Prisma.InputJsonValue,
         status: 'closed',
         notes: data.notes ?? session.notes,
       },
@@ -2710,7 +2723,7 @@ app.post('/api/shift-sessions/:id/close', requireAuth, async (req, res) => {
         userName: session.userName ?? 'System',
         action: 'SHIFT_CLOSE',
         module: 'pos',
-        details: `Shift closed: sales Rs. ${salesTotal.toFixed(2)}, closing cash Rs. ${data.closingCash.toFixed(2)}`,
+        details: `Shift closed: sales Rs. ${salesTotal.toFixed(2)}, closing cash Rs. ${data.closingCash.toFixed(2)}, drawer ${difference >= 0 ? 'over' : 'short'} Rs. ${Math.abs(difference).toFixed(2)}`,
       },
     });
     res.json(serialize.shiftSession(updated));

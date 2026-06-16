@@ -239,7 +239,11 @@ export function POS() {
       const closed = await closeShift(currentShift.id, { closingCash: parseFloat(closingCashInput) || 0 });
       setCurrentShift(null);
       setShowCloseShiftDialog(false);
-      toast.success(`Shift closed — sales Rs. ${closed.salesTotal.toFixed(2)}`);
+      const diff = closed.summary?.difference;
+      const drawerNote = diff == null || Math.abs(diff) < 0.005
+        ? 'drawer balanced'
+        : `drawer ${diff > 0 ? 'over' : 'short'} Rs. ${Math.abs(diff).toFixed(2)}`;
+      toast.success(`Shift closed — sales Rs. ${closed.salesTotal.toFixed(2)}, ${drawerNote}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to close shift');
     } finally {

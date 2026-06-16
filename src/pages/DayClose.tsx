@@ -114,6 +114,23 @@ export function DayClosePage() {
   const derivedOpening = firstShift?.openingCash ?? null;
   const derivedClosing = lastClosed?.closingCash ?? null;
 
+  // Day-level cash reconciliation rolled up from each cashier's closed shift,
+  // plus gross sales split by payment method (Marg "Mode of Payment" view).
+  const closedWithSummary = shifts.filter((s) => s.status === 'closed' && s.summary);
+  const recon = {
+    openingFloat: shifts.reduce((sum, s) => sum + (s.openingCash ?? 0), 0),
+    cashCollected: closedWithSummary.reduce((sum, s) => sum + (s.summary!.cashCollected ?? 0), 0),
+    expectedCash: closedWithSummary.reduce((sum, s) => sum + (s.summary!.expectedCash ?? 0), 0),
+    countedCash: closedWithSummary.reduce((sum, s) => sum + (s.closingCash ?? 0), 0),
+    netDifference: closedWithSummary.reduce((sum, s) => sum + (s.summary!.difference ?? 0), 0),
+  };
+  const byMethodTotals = shifts.reduce<Record<string, number>>((acc, s) => {
+    for (const [method, amt] of Object.entries(s.summary?.byMethod ?? {})) {
+      acc[method] = (acc[method] ?? 0) + (amt ?? 0);
+    }
+    return acc;
+  }, {});
+
   const dayAlreadyClosed = closes.some(
     (c) => c.branchId === branchId && new Date(c.businessDate).toDateString() === dayStart.toDateString(),
   );
@@ -276,8 +293,8 @@ export function DayClosePage() {
       <div className="flex items-center gap-3">
         <ClipboardCheck className="w-6 h-6 text-purple-600" />
         <div>
-          <h1 className="text-2xl font-bold">Day-end close</h1>
-          <p className="text-xs text-gray-500">Start and close shifts; finalize the day's Z-report.</p>
+          <h1 className="text-2xl font-bold">Shift &amp; Day Close</h1>
+          <p className="text-xs text-gray-500">Open and close cashier drawers, reconcile each one, then finalize the day's Z-report.</p>
         </div>
       </div>
 
@@ -346,13 +363,15 @@ export function DayClosePage() {
                 <TableHead>Closed</TableHead>
                 <TableHead className="text-right">Closing</TableHead>
                 <TableHead className="text-right">Sales</TableHead>
+                <TableHead className="text-right">Expected</TableHead>
+                <TableHead className="text-right">Over / Short</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {shifts.length === 0 ? (
-                <TableRow><TableCell colSpan={8} className="text-center text-gray-500 py-8">No shifts for this day.</TableCell></TableRow>
+                <TableRow><TableCell colSpan={10} className="text-center text-gray-500 py-8">No shifts for this day.</TableCell></TableRow>
               ) : shifts.map((s, i) => (
                 <TableRow key={s.id}>
                   <TableCell className="text-xs">
@@ -365,6 +384,20 @@ export function DayClosePage() {
                   <TableCell className="text-xs">{time(s.closedAt)}</TableCell>
                   <TableCell className="text-right text-xs tabular-nums">{money(s.closingCash)}</TableCell>
                   <TableCell className="text-right text-xs tabular-nums">{money(s.salesTotal)}</TableCell>
+                  <TableCell className="text-right text-xs tabular-nums">
+                    {s.summary ? money(s.summary.expectedCash) : '—'}
+                  </TableCell>
+                  <TableCell className="text-right text-xs tabular-nums">
+                    {s.summary && s.status === 'closed' ? (
+                      <span className={cn(
+                        Math.abs(s.summary.difference) < 0.005
+                          ? 'text-gray-500'
+                          : s.summary.difference > 0 ? 'text-emerald-600' : 'text-red-600',
+                      )}>
+                        {s.summary.difference > 0 ? '+' : ''}{money(s.summary.difference)}
+                      </span>
+                    ) : '—'}
+                  </TableCell>
                   <TableCell>
                     {s.status === 'open'
                       ? <Badge className="bg-amber-100 text-amber-700 border-amber-300 text-[10px]">Pending close</Badge>
@@ -396,6 +429,42 @@ export function DayClosePage() {
           </Table>
         </CardContent>
       </Card>
+
+      {/* Cash reconciliation + payments by method */}
+      {closedWithSummary.length > 0 && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <Card className={cn(dark && 'bg-gray-800 border-gray-700')}>
+            <CardHeader><CardTitle className="text-base">Cash reconciliation</CardTitle></CardHeader>
+            <CardContent className="space-y-2 text-sm">
+              <div className="flex justify-between"><span className="text-gray-500">Opening floats</span><span className="tabular-nums">{money(recon.openingFloat)}</span></div>
+              <div className="flex justify-between"><span className="text-gray-500">Cash collected (sales − refunds)</span><span className="tabular-nums">{money(recon.cashCollected)}</span></div>
+              <div className="flex justify-between border-t pt-2"><span className="font-medium">Expected in drawers</span><span className="tabular-nums font-medium">{money(recon.expectedCash)}</span></div>
+              <div className="flex justify-between"><span className="text-gray-500">Counted (closing cash)</span><span className="tabular-nums">{money(recon.countedCash)}</span></div>
+              <div className="flex justify-between border-t pt-2">
+                <span className="font-semibold">Net over / short</span>
+                <span className={cn('tabular-nums font-semibold',
+                  Math.abs(recon.netDifference) < 0.005 ? 'text-gray-600'
+                    : recon.netDifference > 0 ? 'text-emerald-600' : 'text-red-600')}>
+                  {recon.netDifference > 0 ? '+' : ''}{money(recon.netDifference)}
+                </span>
+              </div>
+            </CardContent>
+          </Card>
+          <Card className={cn(dark && 'bg-gray-800 border-gray-700')}>
+            <CardHeader><CardTitle className="text-base">Payments by method</CardTitle></CardHeader>
+            <CardContent className="space-y-2 text-sm">
+              {Object.keys(byMethodTotals).length === 0 ? (
+                <p className="text-gray-500">No payments recorded.</p>
+              ) : Object.entries(byMethodTotals).sort((a, b) => b[1] - a[1]).map(([method, amt]) => (
+                <div key={method} className="flex justify-between">
+                  <span className="text-gray-500 capitalize">{method.replace(/_/g, ' ')}</span>
+                  <span className="tabular-nums">{money(amt)}</span>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {/* Day-end close */}
       <Card className={cn(dark && 'bg-gray-800 border-gray-700')}>
