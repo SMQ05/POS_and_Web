@@ -5,6 +5,7 @@
   "files": ["electron/**/*"],
   "win": {
     "target": ["nsis"],
+    "icon": "build/icon.png",
     "artifactName": "KynexPharmacloud-Setup-${version}.${ext}"
   },
   "nsis": {

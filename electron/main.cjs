@@ -69,6 +69,8 @@ function createWindow() {
     width: 1366,
     height: 850,
     show: false,
+    title: 'Kynex Pharmacloud',
+    icon: path.join(__dirname, '..', 'build', 'icon.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
