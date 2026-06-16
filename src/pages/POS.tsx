@@ -270,6 +270,20 @@ export function POS() {
   const [pendingOverrideBatch, setPendingOverrideBatch] = useState<Batch | null>(null);
   const [showBatchDialog, setShowBatchDialog] = useState(false);
   const [batchHighlightIdx, setBatchHighlightIdx] = useState(0);
+  // Item 6 — keyboard quick-add (manual selection): pick unit, then quantity.
+  const [quickAdd, setQuickAdd] = useState(false);
+  const [addStage, setAddStage] = useState<'unit' | 'qty'>('qty');
+  const [quickUnitIdx, setQuickUnitIdx] = useState(0);
+  const [quickQty, setQuickQty] = useState('1');
+  const qtyInputRef = useRef<HTMLInputElement>(null);
+  const quickUnits = selectedMedicine ? sellableUnits(selectedMedicine) : [];
+  // Focus the quantity field when the quick-add reaches the qty stage.
+  useEffect(() => {
+    if (showBatchDialog && quickAdd && addStage === 'qty') {
+      const id = setTimeout(() => { qtyInputRef.current?.focus(); qtyInputRef.current?.select(); }, 50);
+      return () => clearTimeout(id);
+    }
+  }, [showBatchDialog, quickAdd, addStage]);
   const [showFefoOverrideDialog, setShowFefoOverrideDialog] = useState(false);
   const [showCustomerDialog, setShowCustomerDialog] = useState(false);
   const [showPaymentDialog, setShowPaymentDialog] = useState(false);
@@ -546,11 +560,23 @@ export function POS() {
     }
 
     setBatchHighlightIdx(suggestedIdx >= 0 ? suggestedIdx : 0);
-    // 3-click rule: if only one batch available, skip dialog and add directly
-    if (fefo.length === 1 && suggested) {
-      handleAddFromBatch(suggested, 1, false, medicine);
-    } else if (fefo.length > 1) {
+    const manual = !scannedUnit; // search-driven pick (vs barcode scan)
+    if (manual && fefo.length >= 1) {
+      // Item 6 — keyboard quick-add: choose unit (if >1), then quantity, Enter adds.
+      const units = sellableUnits(medicine);
+      setQuickAdd(true);
+      setQuickUnitIdx(0);
+      setQuickQty('1');
+      setAddStage(units.length > 1 ? 'unit' : 'qty');
       setShowBatchDialog(true);
+    } else {
+      // Scanned path keeps the fast flow: single batch adds directly.
+      setQuickAdd(false);
+      if (fefo.length === 1 && suggested) {
+        handleAddFromBatch(suggested, 1, false, medicine);
+      } else if (fefo.length > 1) {
+        setShowBatchDialog(true);
+      }
     }
     setSearchQuery('');
     setSearchResults([]);
@@ -570,7 +596,7 @@ export function POS() {
   };
 
   // Add to cart from batch — with FEFO override detection
-  const handleAddFromBatch = (batch: Batch, quantity: number, isOverride = false, medicineOverride?: Medicine) => {
+  const handleAddFromBatch = (batch: Batch, quantity: number, isOverride = false, medicineOverride?: Medicine, unitOverride?: MedicineUnit | null) => {
     const medicine = medicineOverride ?? selectedMedicine;
     if (!medicine) return;
 
@@ -605,9 +631,10 @@ export function POS() {
     const defaultTaxRule = settings.taxRules.find((rule) => rule.isActive && rule.isDefault)
       ?? settings.taxRules.find((rule) => rule.isActive);
     const scannedUnit = scannedUnitRef.current?.isActive ? scannedUnitRef.current : null;
-    // Loose sale off → default to the smallest *sellable* (pack) unit, never the
-    // loose base unit. A scanned unit always wins (the physical pack scanned).
-    const baseUnit = scannedUnit
+    // Unit precedence: explicit quick-add choice > scanned pack > loose-aware
+    // default (pack unit when loose sale is off, else the base unit).
+    const baseUnit = unitOverride
+      ?? scannedUnit
       ?? (medicine.allowLooseSale === false
         ? defaultSellableUnit(medicine)
         : (medicine.units?.find((unit) => unit.isBaseUnit && unit.isActive)
@@ -2325,22 +2352,39 @@ export function POS() {
       </div>
 
       {/* Batch Selection Dialog — FEFO enforced */}
-      <Dialog open={showBatchDialog} onOpenChange={setShowBatchDialog}>
+      <Dialog open={showBatchDialog} onOpenChange={(o) => { setShowBatchDialog(o); if (!o) setQuickAdd(false); }}>
         <DialogContent
           className="max-w-lg"
           onKeyDown={(e) => {
-            // Arrow keys navigate; Enter selects the highlighted batch.
             if (availableBatches.length === 0) return;
-            if (e.key === 'ArrowDown') {
+            const batchNav = !quickAdd || addStage === 'unit';
+            if (e.key === 'ArrowDown' && batchNav) {
               e.preventDefault();
               setBatchHighlightIdx((i) => Math.min(i + 1, availableBatches.length - 1));
-            } else if (e.key === 'ArrowUp') {
+            } else if (e.key === 'ArrowUp' && batchNav) {
               e.preventDefault();
               setBatchHighlightIdx((i) => Math.max(i - 1, 0));
+            } else if (quickAdd && addStage === 'unit' && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+              e.preventDefault();
+              const n = quickUnits.length || 1;
+              setQuickUnitIdx((i) => (e.key === 'ArrowRight' ? (i + 1) % n : (i - 1 + n) % n));
             } else if (e.key === 'Enter') {
               e.preventDefault();
+              if (quickAdd && addStage === 'unit') {
+                // Confirm unit → move to quantity.
+                setAddStage('qty');
+                setTimeout(() => { qtyInputRef.current?.focus(); qtyInputRef.current?.select(); }, 0);
+                return;
+              }
               const batch = availableBatches[batchHighlightIdx] ?? availableBatches[0];
-              if (batch) handleAddFromBatch(batch, 1);
+              if (!batch) return;
+              if (quickAdd) {
+                const unit = quickUnits[quickUnitIdx] ?? null;
+                const qty = Math.max(1, parseInt(quickQty, 10) || 1);
+                handleAddFromBatch(batch, qty, false, selectedMedicine ?? undefined, unit);
+              } else {
+                handleAddFromBatch(batch, 1);
+              }
             }
           }}
         >
@@ -2442,10 +2486,80 @@ export function POS() {
               })}
             </div>
           </ScrollArea>
+
+          {/* Item 6 — keyboard quick-add: unit then quantity */}
+          {quickAdd && (
+            <div className="border-t pt-3 space-y-2">
+              {quickUnits.length > 1 && (
+                <div>
+                  <Label className="text-[11px] font-medium text-gray-500">
+                    Unit {addStage === 'unit' && <span className="text-emerald-600">— ← → to choose, Enter to confirm</span>}
+                  </Label>
+                  <div className="flex flex-wrap gap-1.5 mt-1">
+                    {quickUnits.map((u, i) => (
+                      <button
+                        key={u.id}
+                        type="button"
+                        onClick={() => { setQuickUnitIdx(i); setAddStage('qty'); setTimeout(() => { qtyInputRef.current?.focus(); qtyInputRef.current?.select(); }, 0); }}
+                        className={cn(
+                          'px-3 py-1.5 rounded-md border text-sm',
+                          i === quickUnitIdx
+                            ? 'border-emerald-500 bg-emerald-100 text-emerald-800 ring-1 ring-emerald-300'
+                            : 'border-gray-200 hover:bg-gray-50',
+                        )}
+                      >
+                        {u.name}{u.multiplier > 1 ? ` ×${u.multiplier}` : ''}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div className="flex items-end gap-2">
+                <div className="flex-1">
+                  <Label className="text-[11px] font-medium text-gray-500">
+                    Quantity {addStage === 'qty' && <span className="text-emerald-600">— Enter to add</span>}
+                  </Label>
+                  <Input
+                    ref={qtyInputRef}
+                    type="number"
+                    min={1}
+                    value={quickQty}
+                    onFocus={() => setAddStage('qty')}
+                    onChange={(e) => setQuickQty(e.target.value)}
+                    className="h-10 text-lg"
+                  />
+                </div>
+                <Button
+                  className="h-10 bg-emerald-600 hover:bg-emerald-700"
+                  onClick={() => {
+                    const batch = availableBatches[batchHighlightIdx] ?? availableBatches[0];
+                    if (!batch) return;
+                    const unit = quickUnits[quickUnitIdx] ?? null;
+                    const qty = Math.max(1, parseInt(quickQty, 10) || 1);
+                    handleAddFromBatch(batch, qty, false, selectedMedicine ?? undefined, unit);
+                  }}
+                >
+                  Add
+                </Button>
+              </div>
+            </div>
+          )}
+
           <p className="text-[11px] text-gray-500 text-center pt-1 border-t">
-            <kbd className="px-1 py-0.5 bg-gray-100 rounded font-mono">↑ ↓</kbd> navigate ·{' '}
-            <kbd className="px-1 py-0.5 bg-gray-100 rounded font-mono">Enter</kbd> pick highlighted batch ·{' '}
-            <kbd className="px-1 py-0.5 bg-gray-100 rounded font-mono">Esc</kbd> close
+            {quickAdd ? (
+              <>
+                <kbd className="px-1 py-0.5 bg-gray-100 rounded font-mono">↑ ↓</kbd> batch ·{' '}
+                <kbd className="px-1 py-0.5 bg-gray-100 rounded font-mono">← →</kbd> unit ·{' '}
+                <kbd className="px-1 py-0.5 bg-gray-100 rounded font-mono">Enter</kbd> next / add ·{' '}
+                <kbd className="px-1 py-0.5 bg-gray-100 rounded font-mono">Esc</kbd> close
+              </>
+            ) : (
+              <>
+                <kbd className="px-1 py-0.5 bg-gray-100 rounded font-mono">↑ ↓</kbd> navigate ·{' '}
+                <kbd className="px-1 py-0.5 bg-gray-100 rounded font-mono">Enter</kbd> pick highlighted batch ·{' '}
+                <kbd className="px-1 py-0.5 bg-gray-100 rounded font-mono">Esc</kbd> close
+              </>
+            )}
           </p>
         </DialogContent>
       </Dialog>
