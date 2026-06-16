@@ -10,6 +10,8 @@ import { Progress } from '@/components/ui/progress';
 import { exportToCSV, importFromCSV } from '@/lib/csv';
 import { bulkImportBatches, type BulkBatchRow } from '@/lib/backend';
 import { BranchStockDialog } from '@/components/BranchStockDialog';
+import { BatchDispositionDialog } from '@/components/BatchDispositionDialog';
+import type { Batch } from '@/types';
 import { toast } from 'sonner';
 import {
   Table,
@@ -94,6 +96,7 @@ export function Inventory() {
   const [showBranchStock, setShowBranchStock] = useState(false);
   const [showBatchesDialog, setShowBatchesDialog] = useState(false);
   const [showAdjustmentDialog, setShowAdjustmentDialog] = useState(false);
+  const [dispoBatch, setDispoBatch] = useState<Batch | null>(null);
 
   const expiryRiskReport = getExpiryRiskReport();
 
@@ -588,6 +591,18 @@ export function Inventory() {
                         ) : (
                           <Badge variant="outline" className="text-emerald-600 border-emerald-300">{t('common.active')}</Badge>
                         )}
+                        {batch.quantity > 0 && (
+                          <div className="mt-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 px-2 text-[11px] text-red-600 hover:text-red-700"
+                              onClick={() => setDispoBatch(batch)}
+                            >
+                              Return / Write-off
+                            </Button>
+                          </div>
+                        )}
                       </TableCell>
                     </TableRow>
                   );
@@ -612,6 +627,14 @@ export function Inventory() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Damage / waste — return-to-supplier or write-off for a single batch */}
+      <BatchDispositionDialog
+        batch={dispoBatch}
+        medicineName={selectedMedicine?.name ?? ''}
+        open={!!dispoBatch}
+        onOpenChange={(o) => { if (!o) setDispoBatch(null); }}
+      />
 
       {/* Stock Adjustment Dialog */}
       <Dialog open={showAdjustmentDialog} onOpenChange={setShowAdjustmentDialog}>
