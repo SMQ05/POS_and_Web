@@ -1,5 +1,7 @@
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSettingsStore, useDashboardStore, useSalesStore, useInventoryStore, useSupplierStore, useAuthStore, useWebStore } from '@/store';
+import { DistributorOrderDialog } from '@/components/DistributorOrderDialog';
 import { useTranslation } from '@/hooks/useTranslation';
 import { cn, formatCurrency } from '@/lib/utils';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -48,6 +50,7 @@ export function Dashboard() {
   const { suppliers } = useSupplierStore();
   const { currentUser, activeBranchId } = useAuthStore();
   const { t, isRTL } = useTranslation();
+  const [orderSupplierId, setOrderSupplierId] = useState<string | null>(null);
 
   const role = currentUser?.role ?? 'cashier';
   const isOwnerOrManager = role === 'owner' || role === 'manager';
@@ -253,28 +256,45 @@ export function Dashboard() {
           supplier whose visitDays array includes today's weekday. Useful for
           the buyer to plan PO calls in the morning. */}
       {settings.supplierVisitDaysEnabled && (() => {
-        const todayKey = (['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const)[new Date().getDay()];
-        const expected = suppliers.filter((s) => s.isActive && Array.isArray(s.visitDays) && s.visitDays.includes(todayKey));
-        if (expected.length === 0) return null;
+        const wk = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const;
+        const todayKey = wk[new Date().getDay()];
+        const tomorrowKey = wk[(new Date().getDay() + 1) % 7];
+        const visiting = (key: (typeof wk)[number]) => suppliers.filter((s) => s.isActive && Array.isArray(s.visitDays) && s.visitDays.includes(key));
+        const today = visiting(todayKey);
+        const tomorrow = visiting(tomorrowKey);
+        if (today.length === 0 && tomorrow.length === 0) return null;
+        const chip = (s: typeof suppliers[number], tone: string) => (
+          <span key={s.id} className={cn('inline-flex items-center gap-2 text-xs border px-3 py-1.5 rounded-md', tone)}>
+            <Truck className="w-3 h-3" />
+            <span className="font-medium">{s.name}</span>
+            {s.phone && <span className="opacity-70">· {s.phone}</span>}
+            <Button size="sm" variant="ghost" className="h-5 px-1.5 text-[11px] gap-1 hover:bg-white/60" onClick={() => setOrderSupplierId(s.id)}>
+              <ShoppingCart className="w-3 h-3" /> Prepare order
+            </Button>
+          </span>
+        );
         return (
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-base flex items-center gap-2">
                 <Truck className="w-4 h-4 text-purple-600" />
-                Today&apos;s expected suppliers ({expected.length})
+                Distributor visits
               </CardTitle>
-              <CardDescription className="text-xs">Distributors scheduled to visit on {todayKey.toUpperCase()}.</CardDescription>
+              <CardDescription className="text-xs">Prepare the order a day ahead — review, edit, then send by WhatsApp + email.</CardDescription>
             </CardHeader>
-            <CardContent>
-              <div className="flex flex-wrap gap-2">
-                {expected.map((s) => (
-                  <span key={s.id} className="inline-flex items-center gap-2 text-xs bg-purple-50 border border-purple-200 text-purple-800 px-3 py-1.5 rounded-md">
-                    <Truck className="w-3 h-3" />
-                    <span className="font-medium">{s.name}</span>
-                    <span className="text-purple-600">· {s.phone}</span>
-                  </span>
-                ))}
-              </div>
+            <CardContent className="space-y-3">
+              {today.length > 0 && (
+                <div>
+                  <p className="text-[11px] font-semibold text-gray-500 uppercase mb-1">Today ({todayKey.toUpperCase()})</p>
+                  <div className="flex flex-wrap gap-2">{today.map((s) => chip(s, 'bg-purple-50 border-purple-200 text-purple-800'))}</div>
+                </div>
+              )}
+              {tomorrow.length > 0 && (
+                <div>
+                  <p className="text-[11px] font-semibold text-gray-500 uppercase mb-1">Tomorrow ({tomorrowKey.toUpperCase()})</p>
+                  <div className="flex flex-wrap gap-2">{tomorrow.map((s) => chip(s, 'bg-amber-50 border-amber-200 text-amber-800'))}</div>
+                </div>
+              )}
             </CardContent>
           </Card>
         );
@@ -722,6 +742,12 @@ export function Dashboard() {
 
       {/* Web Store Orders — Owner / Superadmin only */}
       {(role === 'owner' || role === 'superadmin') && settings.webStoreEnabled && <WebOrdersSummary />}
+
+      <DistributorOrderDialog
+        supplierId={orderSupplierId}
+        open={!!orderSupplierId}
+        onOpenChange={(o) => { if (!o) setOrderSupplierId(null); }}
+      />
     </div>
   );
 }

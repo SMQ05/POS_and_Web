@@ -39,6 +39,7 @@ import {
   sendTrialExpiryEmail,
   sendAccountSuspendedEmail,
   sendPasswordResetEmail,
+  sendEmail,
 } from './email.js';
 // M5.1 — Web Push (RFC 8030 over VAPID). Optional: when VAPID env vars are
 // missing, push fan-out is a no-op (the import is dynamic so missing keys
@@ -5066,6 +5067,30 @@ app.get('/api/fbr-submissions', requireAuth, requireRole('superadmin', 'owner', 
     },
   });
   res.json(rows);
+});
+
+// Feature 2 — email a purchase order to a distributor, optionally with a PDF
+// attachment (base64). The client also opens a wa.me text-summary link.
+const poEmailSchema = z.object({
+  to: z.string().email(),
+  subject: z.string().trim().max(200).optional(),
+  html: z.string().max(200_000).optional(),
+  pdfBase64: z.string().max(15_000_000).optional(),
+  filename: z.string().trim().max(120).optional(),
+});
+app.post('/api/purchase-orders/send-email', requireAuth, requireRole('superadmin', 'owner', 'manager'), async (req, res) => {
+  try {
+    const data = poEmailSchema.parse(req.body);
+    await sendEmail({
+      to: data.to,
+      subject: data.subject ?? 'Purchase Order',
+      html: data.html ?? '<p>Please find the attached purchase order.</p>',
+      attachments: data.pdfBase64 ? [{ filename: data.filename ?? 'purchase-order.pdf', content: data.pdfBase64 }] : undefined,
+    });
+    res.json({ ok: true });
+  } catch (error) {
+    return sendParseError(res, error);
+  }
 });
 
 app.post('/api/purchases', requireAuth, requireRole('superadmin', 'owner', 'manager'), requireBranchWrite((req) => req.body?.branchId), async (req, res) => {

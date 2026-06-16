@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
 import { exportToCSV, importFromCSV } from '@/lib/csv';
 import { ImportHelpPopover } from '@/components/ImportHelpPopover';
+import { DistributorOrderDialog } from '@/components/DistributorOrderDialog';
 import { toast } from 'sonner';
 import {
   Table,
@@ -42,6 +43,7 @@ import {
   Truck,
   Edit,
   Trash2,
+  ShoppingCart,
   Phone,
   Mail,
   MapPin,
@@ -85,6 +87,7 @@ export function Suppliers() {
   const { t, isRTL } = useTranslation();
   
   const [searchQuery, setSearchQuery] = useState('');
+  const [orderSupplierId, setOrderSupplierId] = useState<string | null>(null);
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [showEditDialog, setShowEditDialog] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -758,6 +761,14 @@ export function Suppliers() {
                           onClick={() => openDetailsDialog(supplier)}
                         >
                           <History className="w-4 h-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          title="Prepare order"
+                          onClick={() => setOrderSupplierId(supplier.id)}
+                        >
+                          <ShoppingCart className="w-4 h-4 text-emerald-600" />
                         </Button>
                         <Button
                           variant="ghost"
@@ -1653,6 +1664,13 @@ export function Suppliers() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Feature 2 — distributor-visit order preview + send */}
+      <DistributorOrderDialog
+        supplierId={orderSupplierId}
+        open={!!orderSupplierId}
+        onOpenChange={(o) => { if (!o) setOrderSupplierId(null); }}
+      />
     </div>
   );
 }

@@ -62,6 +62,39 @@ export function buildReorderPurchase(opts: {
   } as Purchase;
 }
 
+/** Formatted HTML purchase order for emailing a distributor. */
+export function buildPoEmailHtml(
+  supplier: Supplier | undefined,
+  poNumber: string,
+  lines: Array<{ medicine: Medicine | undefined; quantity: number }>,
+  pharmacyName: string,
+): string {
+  const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const rows = lines
+    .map((l, i) => `<tr>
+      <td style="padding:6px 10px;border:1px solid #e5e7eb;">${i + 1}</td>
+      <td style="padding:6px 10px;border:1px solid #e5e7eb;">${esc(l.medicine?.name ?? 'Item')}${l.medicine?.strength ? ' ' + esc(l.medicine.strength) : ''}</td>
+      <td style="padding:6px 10px;border:1px solid #e5e7eb;">${esc(l.medicine?.genericName ?? '')}</td>
+      <td style="padding:6px 10px;border:1px solid #e5e7eb;text-align:right;">${l.quantity}</td>
+    </tr>`)
+    .join('');
+  return `<div style="font-family:Arial,sans-serif;max-width:640px;margin:0 auto;color:#111;">
+    <h2 style="margin:0 0 4px;">Purchase Order ${esc(poNumber)}</h2>
+    <p style="margin:0 0 2px;color:#555;">To: <strong>${esc(supplier?.name ?? 'Distributor')}</strong></p>
+    <p style="margin:0 0 12px;color:#555;">From: ${esc(pharmacyName)}</p>
+    <table style="border-collapse:collapse;width:100%;font-size:14px;">
+      <thead><tr style="background:#f3f4f6;">
+        <th style="padding:6px 10px;border:1px solid #e5e7eb;text-align:left;">#</th>
+        <th style="padding:6px 10px;border:1px solid #e5e7eb;text-align:left;">Item</th>
+        <th style="padding:6px 10px;border:1px solid #e5e7eb;text-align:left;">Generic</th>
+        <th style="padding:6px 10px;border:1px solid #e5e7eb;text-align:right;">Qty</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <p style="margin:14px 0 0;color:#555;">Please supply the above items. Thank you.</p>
+  </div>`;
+}
+
 /** WhatsApp order text for a distributor PO (used for wa.me links). */
 export function whatsappOrderText(
   supplier: Supplier | undefined,

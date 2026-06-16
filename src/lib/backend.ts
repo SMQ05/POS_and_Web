@@ -134,6 +134,20 @@ export async function createUploadSession(purpose?: string): Promise<UploadSessi
 export async function getUploadSession(token: string): Promise<UploadSessionState> {
   return apiRequest<UploadSessionState>(`/upload-sessions/${token}`);
 }
+
+/** Email a purchase order to a distributor (optionally with a base64 PDF). */
+export async function sendPurchaseOrderEmail(payload: {
+  to: string;
+  subject?: string;
+  html?: string;
+  pdfBase64?: string;
+  filename?: string;
+}): Promise<{ ok: boolean }> {
+  return apiRequest<{ ok: boolean }>('/purchase-orders/send-email', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
 /** Build the public mobile-page URL from the API base.
  *
  * In production VITE_API_URL is "/api" (relative), so naive concatenation
