@@ -287,6 +287,9 @@ model Batch {
   // disposed. Lets the Alerts page show a batch as "pending return" and, once
   // actioned, record what happened to it + the value credited/written off.
   disposition       String    @default("active")
+  // Why the batch was returned/written off: expiry | damage | waste. Null on
+  // legacy rows = expiry (the only reason before damage/waste tracking).
+  dispositionReason String?
   dispositionValue  Float?
   dispositionNote   String?   @db.Text
   dispositionAt     DateTime?

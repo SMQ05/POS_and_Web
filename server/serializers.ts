@@ -149,6 +149,7 @@ export function batch(row: any): Batch {
     location: row.location ?? undefined,
     isActive: row.isActive,
     disposition: row.disposition ?? undefined,
+    dispositionReason: row.dispositionReason ?? undefined,
     dispositionValue: row.dispositionValue ?? undefined,
     dispositionNote: row.dispositionNote ?? undefined,
     dispositionAt: row.dispositionAt ?? undefined,

@@ -1674,6 +1674,55 @@ const saleVsPurchase = (ctx: ReportContext): ReportResult => {
   };
 };
 
+// Disposition & Write-off Register — every batch returned to a supplier or
+// written off (expiry / damage / waste), with the value credited or lost.
+const dispositionRegister = (ctx: ReportContext): ReportResult => {
+  const meds = medMap(ctx);
+  const rows: Array<{ date: string; medicine: string; batchNo: string; reason: string; status: string; supplier: string; qty: number; value: number; note: string }> = [];
+  for (const b of ctx.batches) {
+    if (!b.disposition || b.disposition === 'active') continue;
+    if (b.dispositionAt && !inRange(b.dispositionAt, ctx.range)) continue;
+    const med = meds.get(b.medicineId);
+    const sup = ctx.suppliers.find((s) => s.id === b.supplierId);
+    rows.push({
+      date: b.dispositionAt ? dayKey(b.dispositionAt) : '—',
+      medicine: med?.name ?? 'Unknown',
+      batchNo: b.batchNumber,
+      reason: b.dispositionReason ?? 'expiry',
+      status: b.disposition,
+      supplier: sup?.name ?? '—',
+      qty: b.quantity ?? 0,
+      value: b.dispositionValue ?? 0,
+      note: b.dispositionNote ?? '',
+    });
+  }
+  rows.sort((a, b) => b.date.localeCompare(a.date));
+  const returnedValue = rows.filter((r) => r.status === 'returned').reduce((s, r) => s + r.value, 0);
+  const writtenOff = rows.filter((r) => r.status === 'disposed').reduce((s, r) => s + r.value, 0);
+  const pending = rows.filter((r) => r.status === 'pending_return').length;
+  return {
+    title: 'Disposition & Write-off Register',
+    subtitle: rangeLabel(ctx.range),
+    summary: [
+      { label: 'Entries', value: rows.length.toLocaleString() },
+      { label: 'Returned (credit)', value: money(returnedValue), tone: 'emerald' },
+      { label: 'Written off (loss)', value: money(writtenOff), tone: 'red' },
+      { label: 'Pending returns', value: pending.toLocaleString(), tone: 'amber' },
+    ],
+    columns: [
+      { key: 'date', label: 'Date', type: 'date' },
+      { key: 'medicine', label: 'Medicine' },
+      { key: 'batchNo', label: 'Batch #' },
+      { key: 'reason', label: 'Reason', type: 'badge' },
+      { key: 'status', label: 'Action', type: 'badge' },
+      { key: 'supplier', label: 'Supplier' },
+      { key: 'value', label: 'Value', type: 'currency' },
+    ],
+    rows,
+    notes: ['Reason: expiry / damage / waste. Returned = credited by supplier; disposed = written off as a loss expense.'],
+  };
+};
+
 export const REPORT_REGISTRY: ReportDef[] = [
   // Sales
   { id: 'daily-sales',        title: 'Daily Sales Register',         description: 'One row per day — txns, items, payment-method breakdown, returns', category: 'sales',     icon: 'Calendar',       tags: ['Daily'],         run: dailySalesRegister },
@@ -1700,6 +1749,7 @@ export const REPORT_REGISTRY: ReportDef[] = [
   { id: 'slow-movers',        title: 'Slow Movers',                  description: 'Stock not sold in ≥ 30 days — capital is sitting idle',             category: 'inventory', icon: 'Snowflake',      tags: ['Capital'],        run: slowMovers },
   { id: 'reorder-required',   title: 'Reorder Required',             description: 'Items below their reorder level — generate POs from this list',     category: 'inventory', icon: 'ShoppingCart',   tags: ['Action'],         run: reorderRequired },
   { id: 'abc-analysis',       title: 'ABC Analysis',                 description: 'Pareto / 80-20 classification by revenue contribution',             category: 'inventory', icon: 'BarChart3',      tags: ['Strategy'],       run: abcAnalysis },
+  { id: 'disposition-register', title: 'Disposition & Write-off Register', description: 'Batches returned or written off — expiry, damage, waste',       category: 'inventory', icon: 'Recycle',        tags: ['Returns', 'Waste'], run: dispositionRegister },
 
   // Purchases
   { id: 'purchase-register',  title: 'Purchase Register',            description: 'Every PO in period — supplier, total, paid, balance, status',       category: 'purchases', icon: 'ClipboardList',                                  run: purchaseRegister },

@@ -134,7 +134,7 @@ export function Alerts() {
         createdBy: currentUser?.id ?? 'system',
         createdAt: new Date(),
       });
-      updateBatch(b.id, { quantity: 0, disposition: 'returned', dispositionValue: value, dispositionNote: note, dispositionAt: new Date() });
+      updateBatch(b.id, { quantity: 0, disposition: 'returned', dispositionReason: 'expiry', dispositionValue: value, dispositionNote: note, dispositionAt: new Date() });
       toast.success(`Returned to ${supplierName(supplierId)} — Rs. ${value.toLocaleString('en-PK')} credited.`);
     } else if (dispoMode === 'dispose') {
       // Write-off: record an Expense (auto-ledger) and zero the batch.
@@ -147,10 +147,10 @@ export function Alerts() {
         createdBy: currentUser?.id ?? 'system',
         createdAt: new Date(),
       });
-      updateBatch(b.id, { quantity: 0, disposition: 'disposed', dispositionValue: value, dispositionNote: note, dispositionAt: new Date() });
+      updateBatch(b.id, { quantity: 0, disposition: 'disposed', dispositionReason: 'expiry', dispositionValue: value, dispositionNote: note, dispositionAt: new Date() });
       toast.success(`Disposed — Rs. ${value.toLocaleString('en-PK')} written off as loss.`);
     } else if (dispoMode === 'custom') {
-      updateBatch(b.id, { quantity: 0, disposition: 'disposed', dispositionValue: value || undefined, dispositionNote: note, dispositionAt: new Date() });
+      updateBatch(b.id, { quantity: 0, disposition: 'disposed', dispositionReason: 'expiry', dispositionValue: value || undefined, dispositionNote: note, dispositionAt: new Date() });
       toast.success('Batch resolved.');
     }
     setDispoMode(null);

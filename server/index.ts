@@ -306,6 +306,7 @@ const batchCreateSchema = z.object({
   location: z.string().trim().max(100).optional(),
   isActive: z.boolean().default(true),
   disposition: z.enum(['active', 'pending_return', 'returned', 'disposed']).optional(),
+  dispositionReason: z.enum(['expiry', 'damage', 'waste']).optional(),
   dispositionValue: z.number().optional(),
   dispositionNote: z.string().trim().max(1000).optional(),
   dispositionAt: z.coerce.date().optional(),

@@ -404,6 +404,8 @@ export interface Batch {
   isActive: boolean;
   /** Expiry-alert disposition: 'active' | 'pending_return' | 'returned' | 'disposed'. */
   disposition?: 'active' | 'pending_return' | 'returned' | 'disposed';
+  /** Why returned/written off: expiry | damage | waste (null/legacy = expiry). */
+  dispositionReason?: 'expiry' | 'damage' | 'waste';
   /** Value credited (return) or written off (dispose) when actioned. */
   dispositionValue?: number;
   dispositionNote?: string;

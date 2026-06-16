@@ -83,6 +83,7 @@ import {
   FlaskConical,
   BookUser,
   BookOpen,
+  Recycle,
   Download,
   Printer,
   Search,
@@ -107,7 +108,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
   Calendar, Clock, Users, CreditCard, RotateCcw, Percent, TrendingUp, Pill,
   Layers, Boxes, Truck, Wallet, List, AlertTriangle, Snowflake, ShoppingCart,
   BarChart3, ClipboardList, Zap, Hourglass, Star, FileText, Calculator, Shield,
-  Stethoscope, UserCheck, Banknote, Factory, FlaskConical, BookUser, BookOpen,
+  Stethoscope, UserCheck, Banknote, Factory, FlaskConical, BookUser, BookOpen, Recycle,
 };
 
 type DateRangeKey = 'today' | 'week' | 'month' | 'quarter' | 'year' | 'all';
