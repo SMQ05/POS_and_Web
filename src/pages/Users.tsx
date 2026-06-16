@@ -61,15 +61,21 @@ const roles: { value: UserRole; label: string; description: string }[] = [
   { value: 'accountant', label: 'Accountant', description: 'Financial reports only' },
 ];
 
+// One row per gated module. Labels note the newer features each module also
+// controls, since several pages share a module key for access control.
 const permissions = [
   { module: 'pos', label: 'POS Billing' },
-  { module: 'sales', label: 'Sales' },
-  { module: 'inventory', label: 'Inventory' },
+  { module: 'sales', label: 'Sales & Returns' },
+  { module: 'inventory', label: 'Inventory & Reconcile' },
   { module: 'medicines', label: 'Medicines' },
-  { module: 'suppliers', label: 'Suppliers' },
-  { module: 'customers', label: 'Customers' },
-  { module: 'reports', label: 'Reports' },
-  { module: 'users', label: 'Users' },
+  { module: 'suppliers', label: 'Suppliers, Purchase Orders & Network' },
+  { module: 'customers', label: 'Customers & Promise Orders' },
+  { module: 'alerts', label: 'Alerts (expiry / low-stock / returns)' },
+  { module: 'reports', label: 'Reports, Ledger, Audit, Day Close & Inbox' },
+  { module: 'expenses', label: 'Expenses' },
+  { module: 'branches', label: 'Branches' },
+  { module: 'billing', label: 'Subscription & Billing' },
+  { module: 'users', label: 'Users & Permissions' },
   { module: 'settings', label: 'Settings' },
 ];
 
@@ -95,6 +101,7 @@ const roleDefaultPermissions: Record<UserRole, Permission[]> = {
     { module: 'customers', actions: ['create', 'read'] },
     { module: 'inventory', actions: ['read'] },
     { module: 'medicines', actions: ['read'] },
+    { module: 'alerts', actions: ['read'] },
   ],
   salesman: [
     { module: 'pos', actions: ['create', 'read'] },
@@ -102,6 +109,7 @@ const roleDefaultPermissions: Record<UserRole, Permission[]> = {
     { module: 'customers', actions: ['create', 'read'] },
     { module: 'medicines', actions: ['read'] },
     { module: 'inventory', actions: ['read'] },
+    { module: 'alerts', actions: ['read'] },
   ],
   pharmacist: [
     { module: 'medicines', actions: ['create', 'read', 'update', 'delete'] },
@@ -109,12 +117,16 @@ const roleDefaultPermissions: Record<UserRole, Permission[]> = {
     { module: 'pos', actions: ['create', 'read'] },
     { module: 'sales', actions: ['create', 'read'] },
     { module: 'customers', actions: ['create', 'read'] },
+    { module: 'alerts', actions: ['read', 'update'] },
+    { module: 'suppliers', actions: ['read'] },
   ],
   accountant: [
     { module: 'reports', actions: ['read'] },
     { module: 'sales', actions: ['read'] },
     { module: 'suppliers', actions: ['read'] },
     { module: 'customers', actions: ['read'] },
+    { module: 'expenses', actions: ['create', 'read', 'update'] },
+    { module: 'alerts', actions: ['read'] },
   ],
 };
 
