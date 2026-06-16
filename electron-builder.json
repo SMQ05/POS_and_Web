@@ -1,0 +1,18 @@
+{
+  "appId": "com.kynexsolutions.pharmacloud",
+  "productName": "Kynex Pharmacloud",
+  "directories": { "output": "dist-electron" },
+  "files": ["electron/**/*"],
+  "win": {
+    "target": ["nsis"],
+    "artifactName": "KynexPharmacloud-Setup-${version}.${ext}"
+  },
+  "nsis": {
+    "oneClick": false,
+    "perMachine": false,
+    "allowToChangeInstallationDirectory": true,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "shortcutName": "Kynex Pharmacloud"
+  }
+}

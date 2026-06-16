@@ -15,3 +15,6 @@ dist-server
 
 # Deploy artifacts
 *.zip
+
+# Electron build output
+dist-electron
