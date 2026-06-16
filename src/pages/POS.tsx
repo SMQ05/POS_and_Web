@@ -61,6 +61,7 @@ import {
   Store,
 } from 'lucide-react';
 import { BranchStockDialog } from '@/components/BranchStockDialog';
+import { FindAlternativesDialog } from '@/components/FindAlternativesDialog';
 import { parseScannedCode, gtinMatches } from '@/lib/gs1';
 import { toast } from 'sonner';
 import type { CartItem } from '@/store';
@@ -261,6 +262,7 @@ export function POS() {
 
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<Medicine[]>([]);
+  const [showAlternatives, setShowAlternatives] = useState(false);
   const [selectedMedicine, setSelectedMedicine] = useState<Medicine | null>(null);
   const [availableBatches, setAvailableBatches] = useState<Batch[]>([]);
   const [fefoSuggestedBatchId, setFefoSuggestedBatchId] = useState<string | null>(null);
@@ -1873,6 +1875,20 @@ export function POS() {
               </CardContent>
             </Card>
           )}
+
+          {/* Feature 5 — when we don't stock what was typed, offer alternatives */}
+          {searchQuery.trim().length >= 3 && searchResults.length === 0 && (
+            <div className="absolute top-full left-0 right-0 mt-1 z-40">
+              <Button
+                variant="outline"
+                className="w-full gap-2 border-dashed text-emerald-700"
+                onClick={() => setShowAlternatives(true)}
+              >
+                <Search className="w-4 h-4" />
+                Not in stock — find alternatives for “{searchQuery.trim()}”
+              </Button>
+            </div>
+          )}
         </div>
 
         {/* Cart Items */}
@@ -3088,6 +3104,14 @@ export function POS() {
       </Dialog>
 
       <BranchStockDialog open={showBranchStock} onOpenChange={setShowBranchStock} />
+
+      <FindAlternativesDialog
+        open={showAlternatives}
+        onOpenChange={setShowAlternatives}
+        initialQuery={searchQuery}
+        onPick={(id) => { const m = medicines.find((x) => x.id === id); if (m) handleMedicineSelect(m); }}
+      />
+
     </div>
   );
 }
