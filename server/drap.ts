@@ -84,9 +84,40 @@ export async function searchDrapBrand(term: string): Promise<DrapCandidate[]> {
 
 const stripTags = (s: string) => s.replace(/<[^>]*>/g, ' ').replace(/&nbsp;/gi, ' ').replace(/\s+/g, ' ').trim();
 
-/** label (lowercased, trimmed of ':') → value, from the <li> list. */
+/**
+ * label (lowercased, trimmed of ':') → value.
+ *
+ * DRAP reworked the detail page (≈mid-2026) from an `<li>Label: <span>VALUE</span></li>`
+ * list to Bootstrap rows: `<span class="…text-muted…">Label</span><span class="fw-semibold">VALUE</span>`
+ * inside col divs (VALUE may wrap nested <a>/<strong>/<span> tags). We parse the new
+ * layout first and fall back to the old `<li>` one so historical pages still work.
+ */
 function fieldMap(html: string): Map<string, string> {
   const map = new Map<string, string>();
+
+  // New layout: capture each "muted" label span, then take everything up to the
+  // next label span (or section <h5>) as its value — robust to nested tags.
+  const labelRe = /<span[^>]*class="[^"]*text-muted[^"]*"[^>]*>([\s\S]*?)<\/span>/gi;
+  const labels: Array<{ label: string; end: number; start: number }> = [];
+  let lm: RegExpExecArray | null;
+  while ((lm = labelRe.exec(html))) {
+    const label = stripTags(lm[1]).replace(/[:\s]+$/, '').toLowerCase();
+    labels.push({ label, start: lm.index, end: labelRe.lastIndex });
+  }
+  if (labels.length) {
+    for (let i = 0; i < labels.length; i++) {
+      const cur = labels[i];
+      const next = i + 1 < labels.length ? labels[i + 1].start : html.length;
+      let chunk = html.slice(cur.end, next);
+      const hIdx = chunk.search(/<h[1-6][\s>]/i); // stop at a new section heading
+      if (hIdx >= 0) chunk = chunk.slice(0, hIdx);
+      const value = stripTags(chunk);
+      if (cur.label && value) map.set(cur.label, value);
+    }
+    return map;
+  }
+
+  // Legacy layout: <li>Label: <span>VALUE</span></li>.
   const liRe = /<li[^>]*>([\s\S]*?)<\/li>/gi;
   let m: RegExpExecArray | null;
   while ((m = liRe.exec(html))) {
