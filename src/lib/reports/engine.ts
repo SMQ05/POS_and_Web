@@ -94,6 +94,55 @@ export interface ReportContext {
   branchId?: string | null;
   /** Whether the current viewer can see profit numbers. */
   canSeeProfit: boolean;
+  /** Active universal filters (drug type, salt, manufacturer, supplier, …). */
+  filters?: ReportFilters;
+  /**
+   * Pre-computed set of medicineIds matching the medicine-dimension filters
+   * (category / genericName / manufacturer / batchNumber). null = no medicine
+   * filter active (match everything). Reports use `keepItem` / `matchMedicine`
+   * to restrict line items without each re-deriving the set.
+   */
+  medicineIdSet?: Set<string> | null;
+}
+
+/** Universal report filters surfaced in the Reports page filter bar. */
+export interface ReportFilters {
+  category?: string;        // drug type / category
+  genericName?: string;     // salt / generic (substring match)
+  manufacturer?: string;
+  supplierId?: string;      // distributor
+  batchNumber?: string;     // exact batch
+  customerId?: string;
+  salesPersonId?: string;
+}
+
+/** True when a medicine passes the medicine-dimension filters. */
+export function medicineMatchesFilters(m: Medicine, f: ReportFilters | undefined): boolean {
+  if (!f) return true;
+  if (f.category && (m.category ?? '') !== f.category) return false;
+  if (f.manufacturer && (m.manufacturer ?? '') !== f.manufacturer) return false;
+  if (f.genericName) {
+    const g = (m.genericName ?? '').toLowerCase();
+    if (!g.includes(f.genericName.toLowerCase())) return false;
+  }
+  return true;
+}
+
+/** Whether any medicine-dimension filter is active (vs record-level only). */
+export function hasMedicineFilter(f: ReportFilters | undefined): boolean {
+  return !!(f && (f.category || f.genericName || f.manufacturer || f.batchNumber));
+}
+
+/** Keep a sale line item under the active medicine filters. */
+export function keepItem(
+  item: { medicineId?: string; batchNumber?: string },
+  ctx: ReportContext,
+): boolean {
+  const f = ctx.filters;
+  if (!f) return true;
+  if (f.batchNumber && (item.batchNumber ?? '') !== f.batchNumber) return false;
+  if (ctx.medicineIdSet && (!item.medicineId || !ctx.medicineIdSet.has(item.medicineId))) return false;
+  return true;
 }
 
 export interface ReportDef {
@@ -389,6 +438,7 @@ const profitByProduct = (ctx: ReportContext): ReportResult => {
   for (const s of ctx.sales) {
     if (!inRange(s.saleDate, ctx.range) || s.status === 'cancelled') continue;
     for (const i of s.items) {
+      if (!keepItem(i, ctx)) continue;
       const med = ctx.medicines.find((m) => m.id === i.medicineId);
       const k = i.medicineId;
       if (!map.has(k)) map.set(k, { product: med?.name ?? 'Unknown', generic: med?.genericName ?? '—', qty: 0, revenue: 0, cost: 0, profit: 0, margin: 0 });
@@ -428,6 +478,7 @@ const profitByCategory = (ctx: ReportContext): ReportResult => {
   for (const s of ctx.sales) {
     if (!inRange(s.saleDate, ctx.range) || s.status === 'cancelled') continue;
     for (const i of s.items) {
+      if (!keepItem(i, ctx)) continue;
       const med = ctx.medicines.find((m) => m.id === i.medicineId);
       const cat = med?.category ?? 'uncategorized';
       if (!map.has(cat)) map.set(cat, { category: cat, qty: 0, revenue: 0, profit: 0, margin: 0 });
@@ -463,6 +514,7 @@ const profitByBatch = (ctx: ReportContext): ReportResult => {
   for (const s of ctx.sales) {
     if (!inRange(s.saleDate, ctx.range) || s.status === 'cancelled') continue;
     for (const i of s.items) {
+      if (!keepItem(i, ctx)) continue;
       const batch = ctx.batches.find((b) => b.id === i.batchId);
       if (!batch) continue;
       const med = ctx.medicines.find((m) => m.id === i.medicineId);
@@ -1331,6 +1383,244 @@ function rangeLabel(range: ReportContext['range']): string {
 
 // ─── The registry ───────────────────────────────────────────────────────────
 
+// ───────── Marg-style additions (Part B) ────────────────────────────────────
+
+const medMap = (ctx: ReportContext) => new Map(ctx.medicines.map((m) => [m.id, m]));
+const activeSale = (s: Sale, ctx: ReportContext) => inRange(s.saleDate, ctx.range) && s.status !== 'cancelled';
+
+// Day Book — every transaction (sale, return, purchase, expense) in the period,
+// chronologically. Marg's core "Day Book" view.
+const dayBook = (ctx: ReportContext): ReportResult => {
+  type Row = { date: string; time: string; type: string; ref: string; party: string; inflow: number; outflow: number };
+  const rows: Row[] = [];
+  const ts = (d: Date | string) => new Date(d);
+  for (const s of ctx.sales) {
+    if (!activeSale(s, ctx)) continue;
+    rows.push({ date: dayKey(s.saleDate), time: ts(s.saleDate).toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' }), type: 'Sale', ref: s.invoiceNumber, party: s.customerName ?? 'Walk-in', inflow: s.totalAmount, outflow: 0 });
+  }
+  for (const r of ctx.saleReturns) {
+    if (!inRange(r.returnDate, ctx.range)) continue;
+    rows.push({ date: dayKey(r.returnDate), time: ts(r.returnDate).toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' }), type: 'Sale Return', ref: r.returnNumber ?? '—', party: '—', inflow: 0, outflow: r.totalAmount });
+  }
+  for (const p of ctx.purchases) {
+    if (!inRange(p.purchaseDate, ctx.range)) continue;
+    const sup = ctx.suppliers.find((x) => x.id === p.supplierId);
+    rows.push({ date: dayKey(p.purchaseDate), time: ts(p.purchaseDate).toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' }), type: p.isLoose ? 'Loose Purchase' : 'Purchase', ref: p.purchaseNumber, party: sup?.name ?? p.looseSource ?? '—', inflow: 0, outflow: p.totalAmount });
+  }
+  for (const e of ctx.expenses) {
+    if (!inRange(e.date, ctx.range)) continue;
+    rows.push({ date: dayKey(e.date), time: ts(e.date).toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit' }), type: 'Expense', ref: e.category ?? 'Expense', party: e.description ?? '—', inflow: 0, outflow: e.amount });
+  }
+  rows.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+  const inflow = rows.reduce((s, r) => s + r.inflow, 0);
+  const outflow = rows.reduce((s, r) => s + r.outflow, 0);
+  return {
+    title: 'Day Book',
+    subtitle: rangeLabel(ctx.range),
+    summary: [
+      { label: 'Entries', value: rows.length.toLocaleString() },
+      { label: 'Inflow', value: money(inflow), tone: 'emerald' },
+      { label: 'Outflow', value: money(outflow), tone: 'red' },
+      { label: 'Net', value: money(inflow - outflow), tone: inflow - outflow >= 0 ? 'emerald' : 'red' },
+    ],
+    columns: [
+      { key: 'date', label: 'Date', type: 'date' },
+      { key: 'time', label: 'Time' },
+      { key: 'type', label: 'Type', type: 'badge' },
+      { key: 'ref', label: 'Reference' },
+      { key: 'party', label: 'Party' },
+      { key: 'inflow', label: 'Inflow', type: 'currency' },
+      { key: 'outflow', label: 'Outflow', type: 'currency' },
+    ],
+    rows,
+  };
+};
+
+// Mode of Payment — day summary of collections split by method, bill count and
+// returns. Marg's "Mode of Payment Report".
+const modeOfPayment = (ctx: ReportContext): ReportResult => {
+  const byMethod = new Map<string, { method: string; bills: number; amount: number }>();
+  let bills = 0;
+  for (const s of ctx.sales) {
+    if (!activeSale(s, ctx)) continue;
+    bills += 1;
+    for (const p of s.paymentMethods) {
+      if (!byMethod.has(p.method)) byMethod.set(p.method, { method: p.method, bills: 0, amount: 0 });
+      const m = byMethod.get(p.method)!;
+      m.bills += 1;
+      m.amount += p.amount;
+    }
+  }
+  const collected = [...byMethod.values()].reduce((s, m) => s + m.amount, 0);
+  const refunds = ctx.saleReturns.filter((r) => inRange(r.returnDate, ctx.range)).reduce((s, r) => s + r.totalAmount, 0);
+  const rows = [...byMethod.values()]
+    .map((m) => ({ ...m, method: m.method.replace(/_/g, ' '), share: collected ? (m.amount / collected) * 100 : 0 }))
+    .sort((a, b) => b.amount - a.amount);
+  return {
+    title: 'Mode of Payment — Day Summary',
+    subtitle: rangeLabel(ctx.range),
+    summary: [
+      { label: 'Bills', value: bills.toLocaleString(), tone: 'blue' },
+      { label: 'Collected', value: money(collected), tone: 'emerald' },
+      { label: 'Refunds', value: money(refunds), tone: 'red' },
+      { label: 'Net', value: money(collected - refunds) },
+    ],
+    columns: [
+      { key: 'method', label: 'Payment method' },
+      { key: 'bills', label: 'Payments', type: 'number' },
+      { key: 'amount', label: 'Amount', type: 'currency' },
+      { key: 'share', label: 'Share %', type: 'number' },
+    ],
+    rows,
+  };
+};
+
+// Sales by Manufacturer/Company — qty, revenue and (gated) profit grouped by
+// the medicine's manufacturer. Honors active filters.
+const salesByManufacturer = (ctx: ReportContext): ReportResult => {
+  const meds = medMap(ctx);
+  const map = new Map<string, { manufacturer: string; qty: number; revenue: number; profit: number }>();
+  for (const s of ctx.sales) {
+    if (!activeSale(s, ctx)) continue;
+    for (const it of s.items) {
+      if (!keepItem(it, ctx)) continue;
+      const man = meds.get(it.medicineId)?.manufacturer || 'Unknown';
+      if (!map.has(man)) map.set(man, { manufacturer: man, qty: 0, revenue: 0, profit: 0 });
+      const m = map.get(man)!;
+      m.qty += it.quantity;
+      m.revenue += it.total ?? 0;
+      m.profit += it.profit ?? 0;
+    }
+  }
+  const rows = [...map.values()].map((r) => ({ ...r, margin: r.revenue ? (r.profit / r.revenue) * 100 : 0 })).sort((a, b) => b.revenue - a.revenue);
+  return {
+    title: 'Sales by Manufacturer / Company',
+    subtitle: rangeLabel(ctx.range),
+    summary: [
+      { label: 'Companies', value: rows.length.toLocaleString() },
+      { label: 'Revenue', value: money(rows.reduce((s, r) => s + r.revenue, 0)), tone: 'emerald' },
+      { label: 'Top company', value: rows[0]?.manufacturer ?? '—', tone: 'blue' },
+    ],
+    columns: [
+      { key: 'manufacturer', label: 'Manufacturer' },
+      { key: 'qty', label: 'Qty', type: 'number' },
+      { key: 'revenue', label: 'Revenue', type: 'currency' },
+      ...(ctx.canSeeProfit ? [{ key: 'profit', label: 'Profit', type: 'currency' as const }, { key: 'margin', label: 'Margin %', type: 'number' as const }] : []),
+    ],
+    rows,
+  };
+};
+
+// Salt / Generic-wise Sales — group sold items by the medicine's generic name.
+const genericWiseSales = (ctx: ReportContext): ReportResult => {
+  const meds = medMap(ctx);
+  const map = new Map<string, { generic: string; qty: number; revenue: number; profit: number }>();
+  for (const s of ctx.sales) {
+    if (!activeSale(s, ctx)) continue;
+    for (const it of s.items) {
+      if (!keepItem(it, ctx)) continue;
+      const g = meds.get(it.medicineId)?.genericName || 'Unspecified';
+      if (!map.has(g)) map.set(g, { generic: g, qty: 0, revenue: 0, profit: 0 });
+      const m = map.get(g)!;
+      m.qty += it.quantity;
+      m.revenue += it.total ?? 0;
+      m.profit += it.profit ?? 0;
+    }
+  }
+  const rows = [...map.values()].map((r) => ({ ...r, margin: r.revenue ? (r.profit / r.revenue) * 100 : 0 })).sort((a, b) => b.revenue - a.revenue);
+  return {
+    title: 'Salt / Generic-wise Sales',
+    subtitle: rangeLabel(ctx.range),
+    summary: [
+      { label: 'Salts', value: rows.length.toLocaleString() },
+      { label: 'Units sold', value: rows.reduce((s, r) => s + r.qty, 0).toLocaleString(), tone: 'blue' },
+      { label: 'Revenue', value: money(rows.reduce((s, r) => s + r.revenue, 0)), tone: 'emerald' },
+    ],
+    columns: [
+      { key: 'generic', label: 'Salt / Generic' },
+      { key: 'qty', label: 'Qty', type: 'number' },
+      { key: 'revenue', label: 'Revenue', type: 'currency' },
+      ...(ctx.canSeeProfit ? [{ key: 'profit', label: 'Profit', type: 'currency' as const }, { key: 'margin', label: 'Margin %', type: 'number' as const }] : []),
+    ],
+    rows,
+  };
+};
+
+// Distributor / Supplier Ledger — per supplier: purchases, paid, returns and
+// outstanding balance in the period. Marg's "Party ledger" for suppliers.
+const supplierLedger = (ctx: ReportContext): ReportResult => {
+  const map = new Map<string, { supplier: string; purchases: number; purchased: number; paid: number; returned: number; balance: number }>();
+  for (const sup of ctx.suppliers) {
+    if (ctx.filters?.supplierId && sup.id !== ctx.filters.supplierId) continue;
+    map.set(sup.id, { supplier: sup.name, purchases: 0, purchased: 0, paid: 0, returned: 0, balance: sup.currentBalance ?? 0 });
+  }
+  for (const p of ctx.purchases) {
+    if (!inRange(p.purchaseDate, ctx.range) || !p.supplierId) continue;
+    const m = map.get(p.supplierId);
+    if (!m) continue;
+    m.purchases += 1;
+    m.purchased += p.totalAmount ?? 0;
+    m.paid += p.paidAmount ?? 0;
+  }
+  const rows = [...map.values()].filter((r) => r.purchases > 0 || r.balance !== 0).sort((a, b) => b.purchased - a.purchased);
+  return {
+    title: 'Distributor / Supplier Ledger',
+    subtitle: rangeLabel(ctx.range),
+    summary: [
+      { label: 'Suppliers', value: rows.length.toLocaleString() },
+      { label: 'Purchased', value: money(rows.reduce((s, r) => s + r.purchased, 0)), tone: 'blue' },
+      { label: 'Paid', value: money(rows.reduce((s, r) => s + r.paid, 0)), tone: 'emerald' },
+      { label: 'Outstanding', value: money(rows.reduce((s, r) => s + r.balance, 0)), tone: 'red' },
+    ],
+    columns: [
+      { key: 'supplier', label: 'Distributor' },
+      { key: 'purchases', label: 'POs', type: 'number' },
+      { key: 'purchased', label: 'Purchased', type: 'currency' },
+      { key: 'paid', label: 'Paid', type: 'currency' },
+      { key: 'balance', label: 'Outstanding', type: 'currency' },
+    ],
+    rows,
+  };
+};
+
+// Tax by Rate Band — taxable value and tax collected grouped by GST/sales-tax
+// rate (e.g. 0%, 1%, 17%). Built from per-item taxPercent.
+const taxByRateBand = (ctx: ReportContext): ReportResult => {
+  const map = new Map<number, { band: string; rate: number; taxable: number; tax: number; items: number }>();
+  for (const s of ctx.sales) {
+    if (!activeSale(s, ctx)) continue;
+    for (const it of s.items) {
+      if (!keepItem(it, ctx)) continue;
+      const rate = it.taxPercent ?? 0;
+      if (!map.has(rate)) map.set(rate, { band: `${rate}%`, rate, taxable: 0, tax: 0, items: 0 });
+      const m = map.get(rate)!;
+      const line = it.total ?? 0;
+      const tax = line - line / (1 + rate / 100);
+      m.taxable += line - tax;
+      m.tax += tax;
+      m.items += 1;
+    }
+  }
+  const rows = [...map.values()].sort((a, b) => a.rate - b.rate);
+  return {
+    title: 'Tax by Rate Band',
+    subtitle: rangeLabel(ctx.range),
+    summary: [
+      { label: 'Rate bands', value: rows.length.toLocaleString() },
+      { label: 'Taxable value', value: money(rows.reduce((s, r) => s + r.taxable, 0)), tone: 'blue' },
+      { label: 'Tax collected', value: money(rows.reduce((s, r) => s + r.tax, 0)), tone: 'emerald' },
+    ],
+    columns: [
+      { key: 'band', label: 'Rate' },
+      { key: 'items', label: 'Lines', type: 'number' },
+      { key: 'taxable', label: 'Taxable value', type: 'currency' },
+      { key: 'tax', label: 'Tax', type: 'currency' },
+    ],
+    rows,
+    notes: ['Taxable value is back-computed from tax-inclusive line totals at each item\'s tax rate.'],
+  };
+};
+
 export const REPORT_REGISTRY: ReportDef[] = [
   // Sales
   { id: 'daily-sales',        title: 'Daily Sales Register',         description: 'One row per day — txns, items, payment-method breakdown, returns', category: 'sales',     icon: 'Calendar',       tags: ['Daily'],         run: dailySalesRegister },
@@ -1339,6 +1629,9 @@ export const REPORT_REGISTRY: ReportDef[] = [
   { id: 'sales-by-payment',   title: 'Sales by Payment Method',      description: 'Cash vs card vs JazzCash vs EasyPaisa split with share %',          category: 'sales',     icon: 'CreditCard',     tags: ['Payments'],       run: salesByPaymentMethod },
   { id: 'returns-register',   title: 'Returns Register',             description: 'Every return — reason, refund method, value',                       category: 'sales',     icon: 'RotateCcw',      tags: ['Returns'],        run: returnsRegister },
   { id: 'discounts-given',    title: 'Discounts Given',              description: 'Every invoice with a discount and the % off',                       category: 'sales',     icon: 'Percent',        tags: ['Discounts'],      run: discountsGiven },
+  { id: 'mode-of-payment',    title: 'Mode of Payment — Day Summary',description: 'Collections split by method with bill counts and refunds',          category: 'sales',     icon: 'CreditCard',     tags: ['Daily', 'Cash'],  run: modeOfPayment },
+  { id: 'sales-by-manufacturer', title: 'Sales by Manufacturer',     description: 'Company-wise units, revenue and margin',                            category: 'sales',     icon: 'Factory',        tags: ['Company'],        run: salesByManufacturer },
+  { id: 'generic-wise-sales', title: 'Salt / Generic-wise Sales',    description: 'Units and revenue grouped by salt / generic composition',           category: 'sales',     icon: 'FlaskConical',   tags: ['Salt'],           run: genericWiseSales },
 
   // Profit
   { id: 'gp-by-day',          title: 'Gross Profit by Day',          description: 'Revenue, cost, profit and margin% trended over the period',         category: 'profit',    icon: 'TrendingUp',     profitOnly: true, tags: ['Margin'],     run: grossProfitByDay },
@@ -1361,6 +1654,7 @@ export const REPORT_REGISTRY: ReportDef[] = [
 
   // Suppliers
   { id: 'supplier-outstanding', title: 'Supplier Outstanding (Aged)', description: 'Payables broken down by overdue age — 0/30/60/90/90+',              category: 'suppliers', icon: 'Hourglass',      tags: ['Cash flow'],      run: supplierOutstanding },
+  { id: 'supplier-ledger',    title: 'Distributor / Supplier Ledger',description: 'Per-distributor purchases, payments and outstanding balance',       category: 'suppliers', icon: 'BookUser',       tags: ['Ledger'],         run: supplierLedger },
 
   // Customers
   { id: 'top-customers',      title: 'Top Customers',                description: 'Ranked by revenue — visit count, items, last visit, loyalty',       category: 'customers', icon: 'Star',           tags: ['CRM'],            run: topCustomers },
@@ -1369,6 +1663,7 @@ export const REPORT_REGISTRY: ReportDef[] = [
   { id: 'fbr-output-tax',     title: 'FBR Output Tax Register',      description: 'Sales tax collected on each invoice (Annex-C input)',                category: 'tax',       icon: 'FileText',       tags: ['FBR', 'Annex-C'], run: fbrOutputTax },
   { id: 'fbr-input-tax',      title: 'FBR Input Tax Register',       description: 'Tax paid on purchases — claimable as input credit (Annex-A)',        category: 'tax',       icon: 'FileText',       tags: ['FBR', 'Annex-A'], run: fbrInputTax },
   { id: 'fbr-monthly',        title: 'Monthly Tax Filing Summary',   description: 'Per-month Output − Input = Net payable',                            category: 'tax',       icon: 'Calculator',     tags: ['FBR', 'Monthly'], run: monthlyTaxSummary },
+  { id: 'tax-by-rate-band',   title: 'Tax by Rate Band',             description: 'Taxable value and tax collected grouped by tax rate',               category: 'tax',       icon: 'Calculator',     tags: ['GST', 'Rate'],    run: taxByRateBand },
 
   // Regulatory
   { id: 'controlled-register',title: 'Controlled Drug Register',     description: 'Every controlled-drug dispensation with Rx + customer CNIC',         category: 'regulatory',icon: 'Shield',         tags: ['DRAP', 'Form-K'],run: controlledDrugRegister },
@@ -1378,6 +1673,7 @@ export const REPORT_REGISTRY: ReportDef[] = [
   // Financial
   { id: 'profit-loss',        title: 'Profit & Loss Statement',      description: 'Revenue → COGS → GP → expenses → net profit',                        category: 'financial', icon: 'TrendingUp',     profitOnly: true, tags: ['P&L'],         run: profitAndLoss },
   { id: 'cash-book',          title: 'Daily Cash Book',              description: 'Daily inflows (cash/card/digital) vs expense outflows',              category: 'financial', icon: 'Banknote',       tags: ['Cash'],            run: dailyCashBook },
+  { id: 'day-book',           title: 'Day Book',                     description: 'Every transaction — sales, returns, purchases, expenses — chronologically', category: 'financial', icon: 'BookOpen',  tags: ['Ledger', 'Daily'], run: dayBook },
 ];
 
 export const CATEGORY_META: Record<ReportCategory, { label: string; description: string; color: string }> = {

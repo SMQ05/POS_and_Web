@@ -79,6 +79,10 @@ import {
   Stethoscope,
   UserCheck,
   Banknote,
+  Factory,
+  FlaskConical,
+  BookUser,
+  BookOpen,
   Download,
   Printer,
   Search,
@@ -88,10 +92,12 @@ import { Input } from '@/components/ui/input';
 import {
   REPORT_REGISTRY,
   CATEGORY_META,
+  medicineMatchesFilters,
   type ReportCategory,
   type ReportDef,
   type ReportContext,
   type ReportResult,
+  type ReportFilters,
 } from '@/lib/reports/engine';
 import { renderReportToPDF, renderReportToCSV } from '@/lib/reports/render';
 
@@ -101,7 +107,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
   Calendar, Clock, Users, CreditCard, RotateCcw, Percent, TrendingUp, Pill,
   Layers, Boxes, Truck, Wallet, List, AlertTriangle, Snowflake, ShoppingCart,
   BarChart3, ClipboardList, Zap, Hourglass, Star, FileText, Calculator, Shield,
-  Stethoscope, UserCheck, Banknote,
+  Stethoscope, UserCheck, Banknote, Factory, FlaskConical, BookUser, BookOpen,
 };
 
 type DateRangeKey = 'today' | 'week' | 'month' | 'quarter' | 'year' | 'all';
@@ -187,22 +193,102 @@ export function Reports() {
   const [previewing, setPreviewing] = useState<ReportDef | null>(null);
   const [previewResult, setPreviewResult] = useState<ReportResult | null>(null);
 
+  // Universal filters (drug type, salt, manufacturer, distributor, batch, …).
+  const [fltCategory, setFltCategory] = useState('');
+  const [fltGeneric, setFltGeneric] = useState('');
+  const [fltManufacturer, setFltManufacturer] = useState('');
+  const [fltSupplierId, setFltSupplierId] = useState('');
+  const [fltBatch, setFltBatch] = useState('');
+  const [fltCustomerId, setFltCustomerId] = useState('');
+  const [fltSalesPersonId, setFltSalesPersonId] = useState('');
+
   const range = useMemo(() => resolveRange(rangeKey), [rangeKey]);
+
+  const filters: ReportFilters = useMemo(() => ({
+    category: fltCategory || undefined,
+    genericName: fltGeneric.trim() || undefined,
+    manufacturer: fltManufacturer || undefined,
+    supplierId: fltSupplierId || undefined,
+    batchNumber: fltBatch.trim() || undefined,
+    customerId: fltCustomerId || undefined,
+    salesPersonId: fltSalesPersonId || undefined,
+  }), [fltCategory, fltGeneric, fltManufacturer, fltSupplierId, fltBatch, fltCustomerId, fltSalesPersonId]);
+
+  const activeFilterCount = Object.values(filters).filter(Boolean).length;
+
+  // Dropdown option lists derived from the data.
+  const categoryOptions = useMemo(() => [...new Set(medicines.map((m) => m.category).filter(Boolean))].sort() as string[], [medicines]);
+  const manufacturerOptions = useMemo(() => [...new Set(medicines.map((m) => m.manufacturer).filter(Boolean))].sort() as string[], [medicines]);
+  const salesPersonOptions = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const s of branchSales) { const id = s.salesPersonId ?? s.createdBy; if (id) m.set(id, s.salesPersonName ?? id); }
+    return [...m.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+  }, [branchSales]);
+
+  // medicineIdSet: medicines matching the category/salt/manufacturer filters
+  // (batch-only filters leave this null and are matched per-line).
+  const medicineIdSet = useMemo(() => {
+    if (!filters.category && !filters.genericName && !filters.manufacturer) return null;
+    return new Set(medicines.filter((m) => medicineMatchesFilters(m, filters)).map((m) => m.id));
+  }, [filters, medicines]);
+
+  // Central filtering: record-level dims (customer, salesperson) on sales;
+  // supplier + medicine dims on batches; supplier on purchases. Medicine-dim
+  // filters keep whole sales that contain ≥1 matching line (totals stay intact;
+  // item-level reports trim lines via keepItem).
+  const itemMatches = useMemo(() => (it: { medicineId?: string; batchNumber?: string }) => {
+    if (filters.batchNumber && (it.batchNumber ?? '') !== filters.batchNumber) return false;
+    if (medicineIdSet && (!it.medicineId || !medicineIdSet.has(it.medicineId))) return false;
+    return true;
+  }, [filters.batchNumber, medicineIdSet]);
+
+  const fSales = useMemo(() => {
+    let arr = branchSales;
+    if (filters.customerId) arr = arr.filter((s) => s.customerId === filters.customerId);
+    if (filters.salesPersonId) arr = arr.filter((s) => (s.salesPersonId ?? s.createdBy) === filters.salesPersonId);
+    if (medicineIdSet || filters.batchNumber) arr = arr.filter((s) => s.items.some(itemMatches));
+    return arr;
+  }, [branchSales, filters.customerId, filters.salesPersonId, filters.batchNumber, medicineIdSet, itemMatches]);
+
+  const fBatches = useMemo(() => branchBatches.filter((b) => {
+    if (filters.supplierId && b.supplierId !== filters.supplierId) return false;
+    if (filters.batchNumber && b.batchNumber !== filters.batchNumber) return false;
+    if (medicineIdSet && !medicineIdSet.has(b.medicineId)) return false;
+    return true;
+  }), [branchBatches, filters.supplierId, filters.batchNumber, medicineIdSet]);
+
+  const fPurchases = useMemo(
+    () => (filters.supplierId ? branchPurchases.filter((p) => p.supplierId === filters.supplierId) : branchPurchases),
+    [branchPurchases, filters.supplierId],
+  );
+
+  const fReturns = useMemo(() => {
+    if (!filters.customerId && !filters.salesPersonId && !medicineIdSet && !filters.batchNumber) return branchSaleReturns;
+    const ids = new Set(fSales.map((s) => s.id));
+    return branchSaleReturns.filter((r) => ids.has(r.saleId));
+  }, [branchSaleReturns, fSales, filters.customerId, filters.salesPersonId, filters.batchNumber, medicineIdSet]);
+
+  const clearFilters = () => {
+    setFltCategory(''); setFltGeneric(''); setFltManufacturer(''); setFltSupplierId('');
+    setFltBatch(''); setFltCustomerId(''); setFltSalesPersonId('');
+  };
 
   const ctx: ReportContext = useMemo(() => ({
     settings,
-    sales: branchSales,
-    saleReturns: branchSaleReturns,
+    sales: fSales,
+    saleReturns: fReturns,
     medicines,
-    batches: branchBatches,
+    batches: fBatches,
     suppliers,
-    purchases: branchPurchases,
+    purchases: fPurchases,
     customers,
     expenses,
     range,
     canSeeProfit,
     branchId: activeBranchId,
-  }), [settings, branchSales, branchSaleReturns, medicines, branchBatches, suppliers, branchPurchases, customers, expenses, range, canSeeProfit, activeBranchId]);
+    filters,
+    medicineIdSet,
+  }), [settings, fSales, fReturns, medicines, fBatches, suppliers, fPurchases, customers, expenses, range, canSeeProfit, activeBranchId, filters, medicineIdSet]);
 
   // Filtered registry — by category, search, profit-only gating.
   const visibleReports = useMemo(() => {
@@ -315,6 +401,53 @@ export function Reports() {
           ))}
         </TabsList>
       </Tabs>
+
+      {/* Universal filters — drug type, salt, manufacturer, distributor, batch, customer, salesperson */}
+      <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-gray-50/60 dark:bg-gray-800/40 p-2">
+        <span className="text-xs font-medium text-gray-500 px-1">Filters</span>
+        <Select value={fltCategory || 'all'} onValueChange={(v) => setFltCategory(v === 'all' ? '' : v)}>
+          <SelectTrigger className="h-8 w-36 text-xs"><SelectValue placeholder="Drug type" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All drug types</SelectItem>
+            {categoryOptions.map((c) => <SelectItem key={c} value={c} className="capitalize">{c}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Select value={fltManufacturer || 'all'} onValueChange={(v) => setFltManufacturer(v === 'all' ? '' : v)}>
+          <SelectTrigger className="h-8 w-44 text-xs"><SelectValue placeholder="Manufacturer" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All manufacturers</SelectItem>
+            {manufacturerOptions.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Select value={fltSupplierId || 'all'} onValueChange={(v) => setFltSupplierId(v === 'all' ? '' : v)}>
+          <SelectTrigger className="h-8 w-44 text-xs"><SelectValue placeholder="Distributor" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All distributors</SelectItem>
+            {suppliers.map((s) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Select value={fltSalesPersonId || 'all'} onValueChange={(v) => setFltSalesPersonId(v === 'all' ? '' : v)}>
+          <SelectTrigger className="h-8 w-40 text-xs"><SelectValue placeholder="Salesperson" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All salespersons</SelectItem>
+            {salesPersonOptions.map((u) => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Select value={fltCustomerId || 'all'} onValueChange={(v) => setFltCustomerId(v === 'all' ? '' : v)}>
+          <SelectTrigger className="h-8 w-40 text-xs"><SelectValue placeholder="Customer" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All customers</SelectItem>
+            {customers.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Input value={fltGeneric} onChange={(e) => setFltGeneric(e.target.value)} placeholder="Salt / generic" className="h-8 w-36 text-xs" />
+        <Input value={fltBatch} onChange={(e) => setFltBatch(e.target.value)} placeholder="Batch #" className="h-8 w-28 text-xs" />
+        {activeFilterCount > 0 && (
+          <Button variant="ghost" size="sm" className="h-8 text-xs gap-1 text-red-600" onClick={clearFilters}>
+            Clear ({activeFilterCount})
+          </Button>
+        )}
+      </div>
 
       {/* Category description */}
       <p className="text-sm text-gray-500">
