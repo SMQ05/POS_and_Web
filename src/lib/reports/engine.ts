@@ -1621,6 +1621,59 @@ const taxByRateBand = (ctx: ReportContext): ReportResult => {
   };
 };
 
+// Sale vs Purchase — item-wise quantity & value sold against purchased in the
+// period (Marg's "Sale Purchase Analysis"). Honors active filters.
+const saleVsPurchase = (ctx: ReportContext): ReportResult => {
+  const meds = medMap(ctx);
+  const map = new Map<string, { medicine: string; generic: string; qtyPurchased: number; valuePurchased: number; qtySold: number; valueSold: number }>();
+  const ensure = (id: string) => {
+    if (!map.has(id)) {
+      const m = meds.get(id);
+      map.set(id, { medicine: m?.name ?? 'Unknown', generic: m?.genericName ?? '—', qtyPurchased: 0, valuePurchased: 0, qtySold: 0, valueSold: 0 });
+    }
+    return map.get(id)!;
+  };
+  for (const s of ctx.sales) {
+    if (!activeSale(s, ctx)) continue;
+    for (const it of s.items) {
+      if (!keepItem(it, ctx)) continue;
+      const e = ensure(it.medicineId);
+      e.qtySold += it.quantity;
+      e.valueSold += it.total ?? 0;
+    }
+  }
+  for (const pu of ctx.purchases) {
+    if (!inRange(pu.purchaseDate, ctx.range)) continue;
+    for (const it of pu.items ?? []) {
+      if (!keepItem(it, ctx)) continue;
+      const e = ensure(it.medicineId);
+      e.qtyPurchased += it.quantity;
+      e.valuePurchased += it.total ?? (it.purchasePrice ?? 0) * it.quantity;
+    }
+  }
+  const rows = [...map.values()].map((r) => ({ ...r, netQty: r.qtySold - r.qtyPurchased })).sort((a, b) => b.valueSold - a.valueSold);
+  return {
+    title: 'Sale vs Purchase Analysis',
+    subtitle: rangeLabel(ctx.range),
+    summary: [
+      { label: 'Items', value: rows.length.toLocaleString() },
+      { label: 'Purchased', value: money(rows.reduce((s, r) => s + r.valuePurchased, 0)), tone: 'blue' },
+      { label: 'Sold', value: money(rows.reduce((s, r) => s + r.valueSold, 0)), tone: 'emerald' },
+    ],
+    columns: [
+      { key: 'medicine', label: 'Medicine' },
+      { key: 'generic', label: 'Generic' },
+      { key: 'qtyPurchased', label: 'Qty Purch.', type: 'number' },
+      { key: 'valuePurchased', label: 'Value Purch.', type: 'currency' },
+      { key: 'qtySold', label: 'Qty Sold', type: 'number' },
+      { key: 'valueSold', label: 'Value Sold', type: 'currency' },
+      { key: 'netQty', label: 'Net Qty', type: 'number' },
+    ],
+    rows,
+    notes: ['Net Qty = sold − purchased over the period. Negative means you bought more than you sold.'],
+  };
+};
+
 export const REPORT_REGISTRY: ReportDef[] = [
   // Sales
   { id: 'daily-sales',        title: 'Daily Sales Register',         description: 'One row per day — txns, items, payment-method breakdown, returns', category: 'sales',     icon: 'Calendar',       tags: ['Daily'],         run: dailySalesRegister },
@@ -1651,6 +1704,7 @@ export const REPORT_REGISTRY: ReportDef[] = [
   // Purchases
   { id: 'purchase-register',  title: 'Purchase Register',            description: 'Every PO in period — supplier, total, paid, balance, status',       category: 'purchases', icon: 'ClipboardList',                                  run: purchaseRegister },
   { id: 'loose-purchase',     title: 'Loose Purchase Register',      description: 'Off-supplier emergency buys — flag over-reliance',                   category: 'purchases', icon: 'Zap',            tags: ['Audit'],          run: loosePurchaseRegister },
+  { id: 'sale-vs-purchase',   title: 'Sale vs Purchase Analysis',    description: 'Item-wise quantity & value sold against purchased',                 category: 'purchases', icon: 'BarChart3',      tags: ['Analysis'],       run: saleVsPurchase },
 
   // Suppliers
   { id: 'supplier-outstanding', title: 'Supplier Outstanding (Aged)', description: 'Payables broken down by overdue age — 0/30/60/90/90+',              category: 'suppliers', icon: 'Hourglass',      tags: ['Cash flow'],      run: supplierOutstanding },
