@@ -8,6 +8,7 @@ import { useInventoryStore, useSupplierStore, useAuthStore, useSettingsStore } f
 import {
   buildReorderPurchase, nextPoNumber, buildPoEmailHtml, whatsappOrderText,
 } from '@/lib/reorder';
+import { buildPoPdfBase64 } from '@/lib/poPdf';
 import { sendPurchaseOrderEmail } from '@/lib/backend';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -89,15 +90,20 @@ export function DistributorOrderDialog({
 
     const medLines = validLines.map((l) => ({ medicine: medicines.find((m) => m.id === l.medicineId), quantity: l.quantity }));
 
-    // Email the PO to the distributor (if we have an address).
+    // Email the PO to the distributor (if we have an address) — with a PDF attachment.
     if (supplier?.email) {
+      let pdfBase64: string | undefined;
+      try { pdfBase64 = buildPoPdfBase64({ supplier, poNumber, pharmacyName, lines: medLines }); }
+      catch { /* fall back to HTML-only email if PDF generation fails */ }
       try {
         await sendPurchaseOrderEmail({
           to: supplier.email,
           subject: `Purchase Order ${poNumber} — ${pharmacyName}`,
           html: buildPoEmailHtml(supplier, poNumber, medLines, pharmacyName),
+          pdfBase64,
+          filename: `PO-${poNumber}.pdf`,
         });
-        toast.success(`PO ${poNumber} created & emailed to ${supplier.name}.`);
+        toast.success(`PO ${poNumber} created & emailed to ${supplier.name}${pdfBase64 ? ' (PDF attached)' : ''}.`);
       } catch {
         toast.warning(`PO ${poNumber} created, but the email failed to send.`);
       }
