@@ -9,6 +9,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { existsSync } from 'node:fs';
+import { lookup as dnsLookup } from 'node:dns/promises';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -165,6 +166,68 @@ const createTenantSchema = z.object({
 });
 
 const anyObjectSchema = z.record(z.string(), z.unknown());
+
+// ─── SSRF protection ─────────────────────────────────────────────────────────
+// Block requests to private/loopback/link-local/metadata addresses so a
+// client-supplied URL (partner webhook baseUrl, push endpoint) can't be used to
+// reach internal services (cloud metadata 169.254.169.254, localhost, RFC1918).
+function isPrivateIp(ip: string): boolean {
+  const v4 = ip.replace(/^::ffff:/i, '');
+  const m = v4.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+  if (m) {
+    const [a, b] = [Number(m[1]), Number(m[2])];
+    if (a === 10 || a === 127 || a === 0) return true;
+    if (a === 169 && b === 254) return true;            // link-local + metadata
+    if (a === 192 && b === 168) return true;
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a === 100 && b >= 64 && b <= 127) return true;  // CGNAT
+    return false;
+  }
+  const lower = ip.toLowerCase();
+  if (lower === '::1' || lower === '::') return true;
+  if (lower.startsWith('fc') || lower.startsWith('fd')) return true; // ULA
+  if (lower.startsWith('fe80')) return true;                          // link-local
+  return false;
+}
+// Throws if the URL is not a safe public http(s) target. Resolves DNS and checks
+// the resolved IP too (defeats hostname → internal-IP rebinding).
+async function assertPublicHttpUrl(urlStr: string): Promise<void> {
+  let u: URL;
+  try { u = new URL(urlStr); } catch { throw new Error('Invalid URL'); }
+  if (u.protocol !== 'https:' && u.protocol !== 'http:') throw new Error('URL must be http(s)');
+  const host = u.hostname.toLowerCase();
+  if (host === 'localhost' || host.endsWith('.local') || host.endsWith('.internal')) throw new Error('Blocked host');
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(host) || host.includes(':')) {
+    if (isPrivateIp(host)) throw new Error('Blocked private address');
+  }
+  const { address } = await dnsLookup(host);
+  if (isPrivateIp(address)) throw new Error('Blocked private address');
+}
+// Web-push endpoints only ever belong to a handful of known push services.
+// A positive allowlist is tighter than range-blocking for this case.
+const PUSH_HOST_ALLOW = [
+  'fcm.googleapis.com', 'updates.push.services.mozilla.com', 'web.push.apple.com',
+];
+function isAllowedPushEndpoint(urlStr: string): boolean {
+  try {
+    const u = new URL(urlStr);
+    if (u.protocol !== 'https:') return false;
+    const h = u.hostname.toLowerCase();
+    return PUSH_HOST_ALLOW.includes(h) || h.endsWith('.notify.windows.com') || h.endsWith('.push.apple.com') || h.endsWith('.googleapis.com');
+  } catch { return false; }
+}
+
+// SECURITY: uploaded scans (prescriptions, invoices, payment proofs, product
+// images) must be inert raster images or an https URL — never data:text/html or
+// data:image/svg+xml, which would execute script when later opened in-origin.
+const uploadedImageSchema = z
+  .string()
+  .max(4 * 1024 * 1024)
+  .refine(
+    (s) => s === '' || /^data:image\/(png|jpe?g|webp|gif);base64,/i.test(s) || /^https:\/\//i.test(s),
+    'Image must be a PNG/JPEG/WebP/GIF data URL or an https URL',
+  )
+  .optional();
 
 // Roles allowed to authenticate as a salesperson at receipt time.
 const SALES_ROLES = new Set(['owner', 'manager', 'cashier', 'salesman', 'pharmacist']);
@@ -395,7 +458,7 @@ const medicineSupplierPatchSchema = z.object(medicineSupplierFields).partial();
 const purchaseInvoiceCreateSchema = z.object({
   purchaseId: z.string().min(1),
   supplierInvoiceNumber: z.string().trim().min(1).max(100),
-  imageUrl: z.string().max(4 * 1024 * 1024).optional(),
+  imageUrl: uploadedImageSchema,
   totalAmount: z.number().nonnegative(),
   receivedAt: z.coerce.date().optional(),
   notes: z.string().trim().max(500).optional(),
@@ -417,7 +480,7 @@ const purchaseReturnCreateSchema = z.object({
   supplierId: z.string().min(1),
   purchaseId: z.string().optional(),
   returnDate: z.coerce.date().optional(),
-  items: z.array(purchaseReturnItemSchema).min(1),
+  items: z.array(purchaseReturnItemSchema).min(1).max(500),
   totalAmount: z.number().nonnegative(),
   reason: z.string().trim().min(1).max(500),
   stockAdjusted: z.boolean().default(true),
@@ -544,9 +607,9 @@ const saleCreateSchema = z.object({
   prescriptionNumber: z.string().trim().max(50).optional(),
   // Compressed image data URL (<= ~3 MB). MediumText holds 16 MB so this is
   // plenty even with base64 overhead.
-  prescriptionImageUrl: z.string().max(4 * 1024 * 1024).optional(),
+  prescriptionImageUrl: uploadedImageSchema,
   saleDate: z.coerce.date().or(z.string()),
-  items: z.array(saleItemSchema).min(1),
+  items: z.array(saleItemSchema).min(1).max(500),
   subtotal: z.number().nonnegative(),
   discountAmount: z.number().nonnegative().default(0),
   taxAmount: z.number().nonnegative().default(0),
@@ -616,7 +679,7 @@ const purchasePaymentSchema = z.object({
   method: z.enum(['cash', 'card', 'bank_transfer', 'cheque', 'jazzcash', 'easypaisa', 'other']),
   reference: z.string().max(200).optional(),
   notes: z.string().max(500).optional(),
-  proofImageUrl: z.string().max(4 * 1024 * 1024).optional(),
+  proofImageUrl: uploadedImageSchema,
   paidAt: z.coerce.date().or(z.string()),
   recordedBy: z.string().min(1),
 });
@@ -629,7 +692,7 @@ const purchaseCreateSchema = z.object({
   purchaseDate: z.coerce.date().or(z.string()),
   dueDate: z.coerce.date().or(z.string()).optional(),
   paymentTermsDays: z.number().int().nonnegative().optional(),
-  items: z.array(purchaseItemCreateSchema).min(1),
+  items: z.array(purchaseItemCreateSchema).min(1).max(500),
   subtotal: z.number().nonnegative().default(0),
   discountAmount: z.number().nonnegative().default(0),
   taxAmount: z.number().nonnegative().default(0),
@@ -637,8 +700,8 @@ const purchaseCreateSchema = z.object({
   paidAmount: z.number().nonnegative().default(0),
   balanceAmount: z.number().default(0),
   supplierInvoiceNumber: z.string().trim().max(80).optional(),
-  supplierInvoiceImageUrl: z.string().max(4 * 1024 * 1024).optional(),
-  payments: z.array(purchasePaymentSchema).optional(),
+  supplierInvoiceImageUrl: uploadedImageSchema,
+  payments: z.array(purchasePaymentSchema).max(200).optional(),
   isLoose: z.boolean().optional(),
   looseSource: z.string().trim().max(200).optional(),
   status: z.enum(['draft', 'ordered', 'partial', 'received', 'cancelled']).default('draft'),
@@ -718,9 +781,11 @@ function sendParseError(res: express.Response, error: unknown) {
   if (error instanceof z.ZodError) {
     return res.status(400).json({ error: 'Validation failed', details: error.flatten() });
   }
+  // SECURITY: for non-validation errors, log server-side but DON'T echo the raw
+  // message to the client — Prisma/driver errors leak column/constraint names and
+  // internal structure useful to an attacker.
   console.error('[sendParseError]', error);
-  const msg = error instanceof Error ? error.message : String(error);
-  return res.status(400).json({ error: 'Invalid request', detail: msg });
+  return res.status(400).json({ error: 'Invalid request' });
 }
 
 // ─── M6 — Branch access helper + middleware ────────────────────────────────
@@ -737,6 +802,16 @@ async function getBranchAccess(tenantIdVal: string, userId: string, branchId: st
   });
   if (!user) return 'none';
   if (user.role === 'superadmin') return 'full';
+  // SECURITY: block writing against a branch that belongs to ANOTHER tenant.
+  // We only deny when the id resolves to a real Branch row owned by a different
+  // tenant — the app also uses synthetic/default ids (e.g. '1') during load, so a
+  // non-existent id is NOT treated as an attack and falls through to the normal
+  // access logic below (back-compat).
+  const branchRow = await prisma.branch.findUnique({
+    where: { id: branchId },
+    select: { tenantId: true },
+  });
+  if (branchRow && branchRow.tenantId !== tenantIdVal) return 'none';
   // 1. Explicit per-branch grants.
   if (Array.isArray(user.branchAccess) && user.branchAccess.length > 0) {
     const entry = (user.branchAccess as Array<{ branchId: string; access: BranchAccessLevel }>)
@@ -1146,7 +1221,18 @@ app.post('/api/webhooks/payup', async (req, res) => {
     const auth = (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '');
     const headerKey = (req.headers['x-payup-key'] as string | undefined) ?? '';
     const apiKey = process.env.PAYUP_API_KEY ?? '';
-    if (apiKey && auth !== apiKey && headerKey !== apiKey) {
+    // SECURITY: fail CLOSED. If the shared key isn't configured, this endpoint —
+    // which can flip a tenant's subscription to active/paid — must NOT accept
+    // anonymous calls. Previously `if (apiKey && ...)` skipped auth entirely when
+    // the key was empty, leaving a money endpoint wide open.
+    if (!apiKey) {
+      console.error('[payup-webhook] PAYUP_API_KEY not configured — refusing webhook');
+      return res.status(503).json({ error: 'Payment webhook not configured' });
+    }
+    const provided = auth || headerKey;
+    const a = Buffer.from(provided);
+    const b = Buffer.from(apiKey);
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
       console.warn('[payup-webhook] auth rejected');
       return res.status(401).json({ error: 'Unauthorized' });
     }
@@ -1561,6 +1647,12 @@ app.post('/api/users', requireAuth, requireRole('superadmin', 'owner', 'manager'
     if (req.auth?.role === 'manager' && data.role && !['cashier', 'salesman'].includes(data.role)) {
       return res.status(403).json({ error: 'Managers can only create cashier or salesman accounts' });
     }
+    // SECURITY: only owners/superadmins may assign an explicit permissions array
+    // (else a manager mints a wildcard-permissioned account). Managers get the
+    // role's default permissions, not a custom grant.
+    if (data.permissions !== undefined && !['owner', 'superadmin'].includes(req.auth?.role ?? '')) {
+      return res.status(403).json({ error: 'Only owners can assign custom permissions' });
+    }
     const passwordHash = await bcrypt.hash(data.password, 12);
     // Optional POS login: only honored when the role can operate the register,
     // and only when both username + PIN are supplied. PIN is stored hashed.
@@ -1597,13 +1689,31 @@ app.post('/api/users', requireAuth, requireRole('superadmin', 'owner', 'manager'
 app.patch('/api/users/:id', requireAuth, requireRole('superadmin', 'owner', 'manager'), async (req, res) => {
   try {
     const data = userMutationSchema.parse(req.body);
-    if (req.auth?.role === 'manager' && data.role && !['cashier', 'salesman'].includes(data.role)) {
+    const actorRole = req.auth?.role ?? '';
+    const isOwnerLevel = ['owner', 'superadmin'].includes(actorRole);
+    if (actorRole === 'manager' && data.role && !['cashier', 'salesman'].includes(data.role)) {
       return res.status(403).json({ error: 'Managers can only manage cashier or salesman accounts' });
     }
+    // SECURITY: `permissions` is an authorization source. Only owners/superadmins
+    // may set it — otherwise a manager could grant any account (including their
+    // own) wildcard [{module:'*'}] permissions and escalate privilege.
+    if (data.permissions !== undefined && !isOwnerLevel) {
+      return res.status(403).json({ error: 'Only owners can change permissions' });
+    }
     // M6 — only owners (and superadmin) can change per-branch access lists.
-    // Managers attempting to touch this field get a clean rejection.
-    if (data.branchAccess !== undefined && !['owner', 'superadmin'].includes(req.auth?.role ?? '')) {
+    if (data.branchAccess !== undefined && !isOwnerLevel) {
       return res.status(403).json({ error: 'Only owners can manage branch access' });
+    }
+    // SECURITY: a manager must not edit an owner/manager/superadmin (privilege
+    // climbing or lateral tampering). Confirm the TARGET is a cashier/salesman.
+    if (actorRole === 'manager') {
+      const target = await prisma.user.findFirst({
+        where: { id: req.params.id, tenantId: tenantId(req) },
+        select: { role: true },
+      });
+      if (!target || !['cashier', 'salesman'].includes(target.role)) {
+        return res.status(403).json({ error: 'Managers can only manage cashier or salesman accounts' });
+      }
     }
     const updateData: Record<string, unknown> = { ...data };
     if (data.email) updateData.email = data.email.toLowerCase();
@@ -1845,6 +1955,11 @@ async function pinTaken(tId: string, pin: string, excludeUserId?: string): Promi
 app.patch('/api/settings', requireAuth, requireRole('superadmin', 'owner', 'manager'), async (req, res) => {
   try {
     const patch = anyObjectSchema.parse(req.body);
+    // SECURITY: drop prototype-pollution keys before this object is merged/stored,
+    // so a future deep-merge refactor can't be tricked into polluting Object.prototype.
+    delete (patch as Record<string, unknown>).__proto__;
+    delete (patch as Record<string, unknown>).constructor;
+    delete (patch as Record<string, unknown>).prototype;
     const id = tenantId(req);
     const tenant = await prisma.tenant.findUnique({ where: { id } });
     if (!tenant) return res.status(404).json({ error: 'Tenant not found' });
@@ -2190,6 +2305,10 @@ app.post('/api/suppliers/:id/payment', requireAuth, requireRole('superadmin', 'o
       const supplier = await tx.supplier.findFirst({ where: { id: req.params.id, tenantId: id } });
       if (!supplier) throw new Error('SUPPLIER_NOT_FOUND');
 
+      // NOTE: overpayment is a legitimate advance/prepayment workflow here, so we
+      // don't reject amount > balance. The full amount is recorded in the expense
+      // ledger + audit log (so any inflated "payment" is owner-visible/auditable),
+      // and the balance floors at 0 — the excess is tracked as a supplier advance.
       const newBalance = Math.max(0, supplier.currentBalance - data.amount);
       const updated = await tx.supplier.update({
         where: { id: supplier.id, tenantId: id },
@@ -2453,7 +2572,14 @@ app.post('/api/purchase-returns', requireAuth, requireRole('superadmin', 'owner'
 // browse the audit trail (they CAN trigger entries via their actions).
 app.get('/api/audit-logs', requireAuth, requireRole('superadmin', 'owner', 'manager'), async (req, res) => {
   const tId = tenantId(req);
-  const { from, to, userId, module, action, q, limit } = req.query as Record<string, string | undefined>;
+  // SECURITY: coerce every query param to a plain string. Express's qs parser
+  // turns `?userId[contains]=x` into an OBJECT; passing that straight into a
+  // Prisma `where` is operator injection. `str()` collapses anything non-string
+  // to undefined so only primitives reach Prisma.
+  const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
+  const from = str(req.query.from), to = str(req.query.to);
+  const userId = str(req.query.userId), module = str(req.query.module);
+  const action = str(req.query.action), q = str(req.query.q), limit = str(req.query.limit);
 
   const where: Record<string, unknown> = { tenantId: tId };
   if (from || to) {
@@ -2568,6 +2694,12 @@ app.get('/api/push/vapid-key', requireAuth, (_req, res) => {
 app.post('/api/push/subscribe', requireAuth, async (req, res) => {
   try {
     const data = pushSubscribeSchema.parse(req.body);
+    // SECURITY: only accept endpoints belonging to real push services — otherwise
+    // a client could register an internal URL (e.g. 169.254.169.254) that the
+    // server would then POST to when sending notifications (SSRF).
+    if (!isAllowedPushEndpoint(data.endpoint)) {
+      return res.status(400).json({ error: 'Unsupported push endpoint' });
+    }
     const tId = tenantId(req);
     const row = await prisma.pushSubscription.upsert({
       where: { tenantId_endpoint: { tenantId: tId, endpoint: data.endpoint } },
@@ -3461,6 +3593,13 @@ async function deliverOutboxEvent(row: {
   if (!partner.baseUrl) return { ok: false, error: 'Partner has no baseUrl' };
 
   const url = partner.baseUrl.replace(/\/$/, '') + '/webhooks/' + row.event.replace(/\./g, '/');
+  // SECURITY: a partner's baseUrl is operator/partner-supplied — make sure the
+  // outbound delivery can't be aimed at internal infrastructure (SSRF).
+  try {
+    await assertPublicHttpUrl(url);
+  } catch (e) {
+    return { ok: false, error: `Blocked delivery URL: ${e instanceof Error ? e.message : 'unsafe'}` };
+  }
   const body = JSON.stringify({
     tenantId: row.tenantId,
     event: row.event,
@@ -4867,7 +5006,10 @@ app.post('/api/sale-returns', requireAuth, async (req, res) => {
           returnNumber,
           items: returnItems,
           totalAmount,
-          refundMethod: { ...data.refundMethod, amount: data.refundMethod.amount || totalAmount },
+          // SECURITY: the refund paid out must equal the server-recomputed return
+          // value — never trust a client-sent refund amount (it's the cash the
+          // cashier hands back; a larger value is a drawer skim).
+          refundMethod: { ...data.refundMethod, amount: Math.min(data.refundMethod.amount || totalAmount, totalAmount) },
           reason: data.reason,
           restockInventory: data.restockInventory,
           fbrStatus: originalFbrSubmitted ? 'pending' : 'not_required',
@@ -4899,6 +5041,35 @@ app.post('/api/sale-returns', requireAuth, async (req, res) => {
           balanceAmount: Number((sale.balanceAmount - totalAmount).toFixed(2)),
         },
       });
+
+      // SECURITY (loyalty integrity): claw back points earned on the returned
+      // value and refund points that were redeemed, proportional to the returned
+      // amount — otherwise: buy → earn points → refund for cash → keep the points
+      // → redeem them as free discount. Clamped so the balance can never go below 0.
+      const saleLoyaltyEarned = (sale as { loyaltyPointsEarned?: number }).loyaltyPointsEarned ?? 0;
+      const saleLoyaltyRedeemed = (sale as { loyaltyPointsRedeemed?: number }).loyaltyPointsRedeemed ?? 0;
+      if (sale.customerId && (saleLoyaltyEarned || saleLoyaltyRedeemed)) {
+        const saleTotal = sale.totalAmount || 0;
+        const frac = saleTotal > 0 ? Math.min(1, totalAmount / saleTotal) : (fullyReturned ? 1 : 0);
+        const clawEarned = Math.round(saleLoyaltyEarned * frac);
+        const refundRedeemed = Math.round(saleLoyaltyRedeemed * frac);
+        const delta = refundRedeemed - clawEarned;
+        if (delta !== 0) {
+          const cust = await tx.customer.findFirst({
+            where: { id: sale.customerId, tenantId: id },
+            select: { loyaltyPoints: true },
+          });
+          if (cust) {
+            const applied = Math.max(delta, -cust.loyaltyPoints); // never below zero
+            if (applied !== 0) {
+              await tx.customer.update({
+                where: { id: sale.customerId },
+                data: { loyaltyPoints: { increment: applied } },
+              });
+            }
+          }
+        }
+      }
 
       await tx.auditLog.create({
         data: {
@@ -5933,6 +6104,15 @@ app.get(/^\/CL0\//, (req, res) => {
     const encoded = segments[1];
     const target = decodeURIComponent(encoded);
     if (!/^https?:\/\//i.test(target)) return res.redirect(302, '/login');
+    // SECURITY: open-redirect guard. Only bounce to our own domain — the app's
+    // emails only ever link back to it. An attacker-crafted /CL0/ URL pointing at
+    // an external phishing site is rejected to /login.
+    let host = '';
+    try { host = new URL(target).hostname.toLowerCase(); } catch { return res.redirect(302, '/login'); }
+    let appHost = '';
+    try { appHost = new URL(process.env.APP_URL ?? 'https://pos.kynexsolutions.com').hostname.toLowerCase(); } catch { /* ignore */ }
+    const allowed = host === appHost || host === 'kynexsolutions.com' || host.endsWith('.kynexsolutions.com');
+    if (!allowed) return res.redirect(302, '/login');
     return res.redirect(302, target);
   } catch {
     return res.redirect(302, '/login');

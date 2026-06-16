@@ -30,7 +30,15 @@ export function openDataUrlInNewTab(dataUrl: string, fileName?: string): void {
     const header = dataUrl.slice(5, commaIdx); // strip "data:"
     const payload = dataUrl.slice(commaIdx + 1);
     const isBase64 = header.includes(';base64');
-    const mime = header.split(';')[0] || 'application/octet-stream';
+    const rawMime = (header.split(';')[0] || 'application/octet-stream').toLowerCase();
+
+    // SECURITY: a stored attachment whose MIME is text/html or image/svg+xml would,
+    // when opened as a blob: URL (same origin), execute attacker JavaScript with the
+    // app's session. Only ever RENDER a strict allowlist of inert types; force a
+    // download (with a neutralized octet-stream type) for everything else so nothing
+    // scriptable is ever navigated to in-origin.
+    const RENDERABLE = new Set(['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/gif', 'application/pdf']);
+    const mime = RENDERABLE.has(rawMime) ? rawMime : 'application/octet-stream';
 
     let bytes: Uint8Array;
     if (isBase64) {
@@ -77,13 +85,24 @@ export function openDataUrlInNewTab(dataUrl: string, fileName?: string): void {
       win.document.close();
       // Revoke after a delay — the new window has loaded the blob by then.
       setTimeout(() => URL.revokeObjectURL(url), 60_000);
-    } else {
-      // PDFs and others go straight to the browser viewer.
+    } else if (mime === 'application/pdf') {
+      // PDFs go straight to the browser viewer (inert).
       const w = window.open(url, '_blank', 'noopener,noreferrer');
       if (!w) {
         // Pop-up blocked — same-tab nav as fallback
         window.location.href = url;
       }
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } else {
+      // Unknown / non-allowlisted type (e.g. an attacker-stored text/html or SVG):
+      // never navigate to it. Force a download as an opaque octet-stream so it
+      // can't run in our origin.
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = (fileName || 'attachment').replace(/[<>"&/\\]/g, '');
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 60_000);
     }
   } catch (err) {

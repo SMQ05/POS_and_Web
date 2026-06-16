@@ -403,9 +403,15 @@ export function exportComprehensiveCSV(data: ReportData) {
 }
 
 function csvSection(title: string, rows: string[][]): string {
+  // SECURITY: neutralize formula injection (=, +, -, @, tab, CR prefixes).
+  const cell = (raw: string) => {
+    let v = String(raw).replace(/"/g, '""');
+    if (/^[=+\-@\t\r]/.test(v)) v = `'${v}`;
+    return `"${v}"`;
+  };
   const separator = '═'.repeat(60);
-  const header = `"${separator}"\n"${title}"\n"${separator}"`;
-  const csvRows = rows.map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
+  const header = `"${separator}"\n${cell(title)}\n"${separator}"`;
+  const csvRows = rows.map(row => row.map(cell).join(',')).join('\n');
   return `${header}\n${csvRows}`;
 }
 

@@ -12,16 +12,25 @@ import { decryptSecureExport } from './backend';
 
 // ─── EXPORT ─────────────────────────────────────────────────────────────────
 
+// SECURITY: neutralize CSV/Excel formula injection. A cell beginning with
+// = + - @ (or tab/CR) is interpreted as a formula by Excel/LibreOffice on open —
+// e.g. =HYPERLINK(...) or =cmd|... — so we prefix such cells with a single quote.
+function csvCell(raw: string): string {
+  let v = raw.replace(/"/g, '""');
+  if (/^[=+\-@\t\r]/.test(v)) v = `'${v}`;
+  return `"${v}"`;
+}
+
 /** Serialize rows to a CSV string. */
 function buildCSV<T extends object>(data: T[], columns: { key: keyof T; label: string }[]): string {
-  const header = columns.map((c) => `"${String(c.label)}"`).join(',');
+  const header = columns.map((c) => csvCell(String(c.label))).join(',');
   const rows = data.map((row) =>
     columns
       .map((c) => {
         const val = row[c.key];
         if (val instanceof Date) return `"${val.toISOString()}"`;
         if (val === null || val === undefined) return '""';
-        return `"${String(val).replace(/"/g, '""')}"`;
+        return csvCell(String(val));
       })
       .join(','),
   );
