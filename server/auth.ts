@@ -5,12 +5,20 @@ import { prisma } from './prisma.js';
 // SECURITY: no hardcoded fallback. A weak/known signing secret means anyone can
 // forge a token for any { userId, tenantId, role } and take over every tenant.
 // We fail closed: the secret MUST come from the environment, and short/empty
-// secrets are rejected at module load so the process never starts unsafely.
-const JWT_SECRET = process.env.JWT_SECRET ?? '';
-if (!JWT_SECRET || JWT_SECRET.length < 32) {
-  throw new Error(
-    'JWT_SECRET is missing or too short (need ≥32 chars). Refusing to start with a weak/forgeable signing key.',
-  );
+// secrets are rejected. The read is LAZY (first sign/verify) rather than at module
+// load, so it can't crash boot due to ESM import ordering vs. dotenv.config()
+// (imported modules evaluate before the importer's body where dotenv loads).
+let cachedSecret: string | null = null;
+function getJwtSecret(): string {
+  if (cachedSecret) return cachedSecret;
+  const secret = process.env.JWT_SECRET ?? '';
+  if (!secret || secret.length < 32) {
+    throw new Error(
+      'JWT_SECRET is missing or too short (need ≥32 chars). Refusing to sign/verify with a weak/forgeable key.',
+    );
+  }
+  cachedSecret = secret;
+  return secret;
 }
 // Pin the algorithm on both sign and verify to prevent algorithm-confusion
 // (e.g. an attacker presenting an "alg":"none" or RS256-vs-HS256 mismatched token).
@@ -31,7 +39,7 @@ declare global {
 }
 
 export function signToken(payload: AuthContext): string {
-  return jwt.sign(payload, JWT_SECRET, { algorithm: JWT_ALG, expiresIn: '12h' });
+  return jwt.sign(payload, getJwtSecret(), { algorithm: JWT_ALG, expiresIn: '12h' });
 }
 
 export async function requireAuth(req: Request, res: Response, next: NextFunction) {
@@ -43,7 +51,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
   }
 
   try {
-    const decoded = jwt.verify(token, JWT_SECRET, { algorithms: [JWT_ALG] }) as AuthContext;
+    const decoded = jwt.verify(token, getJwtSecret(), { algorithms: [JWT_ALG] }) as AuthContext;
     const user = await prisma.user.findFirst({
       where: {
         id: decoded.userId,

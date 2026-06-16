@@ -4375,13 +4375,15 @@ async function applyLoyaltyForSale(
     throw new LoyaltyError('Insufficient loyalty points to redeem');
   }
 
-  // Cap earned by the tenant's configured earn rate (default 1 pt/rupee) so a
-  // tampered client can't claim more points than the purchase warrants.
+  // Cap earned by the tenant's configured earn rate so a tampered client can't
+  // claim more points than the purchase warrants. Mirror the client formula
+  // (POS.tsx): earned = floor(totalPaid / loyaltyRupeesPerPoint), default 1 pt
+  // per Rs 100. +1 absorbs rounding so a legitimate earn is never clamped down.
   const tenant = await tx.tenant.findUnique({ where: { id: tenantIdValue }, select: { settings: true } });
   const s = (tenant?.settings as Record<string, unknown>) ?? {};
   const loyaltyEnabled = s.enableLoyalty !== false;
-  const pointsPerRupee = Math.max(0, Number(s.loyaltyPointsPerRupee ?? 1) || 0);
-  const earnedCap = Math.ceil(Math.max(0, sale.totalAmount) * pointsPerRupee) + 1; // +1 absorbs rounding
+  const rupeesPerPoint = Math.max(1, Number(s.loyaltyRupeesPerPoint ?? 100) || 100);
+  const earnedCap = Math.floor(Math.max(0, sale.totalAmount) / rupeesPerPoint) + 1;
   const earned = loyaltyEnabled ? Math.min(earnedClaim, earnedCap) : 0;
 
   await tx.customer.update({
