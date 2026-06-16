@@ -70,6 +70,7 @@ import { useTranslation } from '@/hooks/useTranslation';
 import { processUploadedFile } from '@/lib/image';
 import { createUploadSession, getUploadSession, uploadPageUrl, verifySalesPin, type VerifiedSalesperson, fetchOpenShift, openShift, closeShift, fetchCatalogByGtin, searchDrap } from '@/lib/backend';
 import { getVisiblePrices, resolveTradePrice, paymentMethodDefault } from '@/lib/posPricing';
+import { sellableUnits, defaultSellableUnit } from '@/lib/posUnits';
 import type { ShiftSession } from '@/types';
 
 // ─── FBR pre-flight check — warns when cart items lack FBR fields ──────────
@@ -604,9 +605,13 @@ export function POS() {
     const defaultTaxRule = settings.taxRules.find((rule) => rule.isActive && rule.isDefault)
       ?? settings.taxRules.find((rule) => rule.isActive);
     const scannedUnit = scannedUnitRef.current?.isActive ? scannedUnitRef.current : null;
+    // Loose sale off → default to the smallest *sellable* (pack) unit, never the
+    // loose base unit. A scanned unit always wins (the physical pack scanned).
     const baseUnit = scannedUnit
-      ?? medicine.units?.find((unit) => unit.isBaseUnit && unit.isActive)
-      ?? medicine.units?.find((unit) => unit.isActive);
+      ?? (medicine.allowLooseSale === false
+        ? defaultSellableUnit(medicine)
+        : (medicine.units?.find((unit) => unit.isBaseUnit && unit.isActive)
+          ?? medicine.units?.find((unit) => unit.isActive)));
     const unitPrice = baseUnit?.salePrice ?? batch.salePrice;
     const unitMultiplier = baseUnit?.multiplier ?? 1;
     const purchasePrice = batch.purchasePrice * unitMultiplier;
@@ -2009,9 +2014,12 @@ export function POS() {
                                 <SelectValue placeholder="Unit" />
                               </SelectTrigger>
                               <SelectContent>
-                                {(medicines.find((m) => m.id === item.medicineId)?.units?.filter((u) => u.isActive) ?? [
-                                  { id: `${item.medicineId}-base`, name: item.unitName || 'unit', abbreviation: item.unitName || 'unit', multiplier: item.unitMultiplier || 1, isBaseUnit: true, isActive: true },
-                                ]).map((unit) => (
+                                {(() => {
+                                  const med = medicines.find((m) => m.id === item.medicineId);
+                                  return med ? sellableUnits(med) : [
+                                    { id: `${item.medicineId}-base`, name: item.unitName || 'unit', abbreviation: item.unitName || 'unit', multiplier: item.unitMultiplier || 1, isBaseUnit: true, isActive: true },
+                                  ];
+                                })().map((unit) => (
                                   <SelectItem key={unit.id} value={unit.abbreviation || unit.name}>
                                     {unit.name} x{unit.multiplier}
                                   </SelectItem>
