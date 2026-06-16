@@ -12,6 +12,24 @@ const path = require('path');
 const APP_URL = process.env.KYNEX_APP_URL || 'https://pos.kynexsolutions.com';
 
 let win = null;
+let splash = null;
+
+// Instant branded splash so launch never shows a blank window while the login
+// page loads over the network (no image dependency — pure CSS on brand colors).
+function createSplash() {
+  splash = new BrowserWindow({
+    width: 420, height: 300, frame: false, resizable: false, center: true,
+    backgroundColor: '#0a1628', alwaysOnTop: true, skipTaskbar: true, show: true,
+  });
+  const html = `<!doctype html><html><body style="margin:0;height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#0a1628;font-family:Segoe UI,Arial,sans-serif;color:#fff">
+    <div style="font-size:42px;font-weight:800;letter-spacing:1px">K<span style="color:#1f9cf0">X</span></div>
+    <div style="margin-top:8px;font-size:16px;font-weight:600">Kynex Pharmacloud</div>
+    <div style="margin-top:22px;width:34px;height:34px;border:3px solid rgba(255,255,255,.15);border-top-color:#1f9cf0;border-radius:50%;animation:s 0.8s linear infinite"></div>
+    <div style="margin-top:16px;font-size:12px;color:#8aa0b8">Loading…</div>
+    <style>@keyframes s{to{transform:rotate(360deg)}}</style>
+  </body></html>`;
+  splash.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
+}
 
 /** Navigate the SPA to `route` via the History API (React Router picks it up). */
 function go(route) {
@@ -70,16 +88,30 @@ function createWindow() {
     height: 850,
     show: false,
     title: 'Kynex Pharmacloud',
-    icon: path.join(__dirname, '..', 'build', 'icon.png'),
+    icon: path.join(__dirname, 'icon.png'),
+    backgroundColor: '#0a1628',
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
     },
   });
-  win.maximize();
-  win.show();
-  win.loadURL(APP_URL);
+  // Go straight to the login page (skip the marketing landing). The SPA bundle
+  // that the login page loads IS the whole app, so the dashboard is already in
+  // memory once you log in — no extra download. Electron's persistent HTTP cache
+  // makes repeat launches load the bundle from disk.
+  win.loadURL(APP_URL + '/login');
+
+  // Reveal the real window only once it's painted — no blank-white flash; the
+  // splash covers the network load until then.
+  const reveal = () => {
+    if (!win || win.isDestroyed()) return;
+    if (!win.isVisible()) { win.maximize(); win.show(); }
+    if (splash && !splash.isDestroyed()) { splash.close(); splash = null; }
+  };
+  win.once('ready-to-show', reveal);
+  win.webContents.on('did-fail-load', reveal); // show the error page rather than hang on splash
+  setTimeout(reveal, 15000);                    // hard fallback if the network stalls
 
   // The receipt printer opens a popup via window.open('') → about:blank, and our
   // app navigates within APP_URL — both must be ALLOWED as in-app windows. Only
@@ -104,6 +136,7 @@ function createWindow() {
 
 app.whenReady().then(() => {
   buildMenu();
+  createSplash();
   createWindow();
   // A couple of OS-global shortcuts (work even when the menu isn't focused).
   globalShortcut.register('CmdOrCtrl+2', () => go('/pos'));
