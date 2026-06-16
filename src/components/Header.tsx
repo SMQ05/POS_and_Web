@@ -119,9 +119,9 @@ export function Header({ onMobileMenuClick }: HeaderProps = {}) {
 
       {/* Right Side Actions */}
       <div className="flex items-center gap-1 sm:gap-3 shrink-0">
-        {/* Branch Selector — only a switcher when there's more than one branch;
-            otherwise a plain label (no point switching a single-branch pharmacy). */}
-        {branches.length <= 1 ? (
+        {/* Branch Selector — only a switcher when multi-branch is enabled in
+            Settings; otherwise a plain label (single-branch pharmacy). */}
+        {!settings.multiBranchEnabled ? (
           <span className="hidden sm:flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300 px-2">
             <Store className="w-4 h-4" />
             {activeBranch?.name ?? branches[0]?.name ?? t('header.mainBranch')}

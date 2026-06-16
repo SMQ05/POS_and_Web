@@ -399,8 +399,8 @@ export function Users() {
 
       {/* M6 — Per-branch access list. Owner-only. Three states per branch:
           "none" (no entry), "read", "full". Server enforces the same rules. */}
-      {/* Per-branch access only matters with more than one branch. */}
-      {currentUser?.role === 'owner' && branchesList.length > 1 && (
+      {/* Per-branch access only matters when multi-branch is enabled. */}
+      {currentUser?.role === 'owner' && settings.multiBranchEnabled && branchesList.length > 1 && (
         <div className="space-y-2">
           <Label>Branch access</Label>
           <p className="text-xs text-gray-500 -mt-1">

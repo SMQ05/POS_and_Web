@@ -88,7 +88,8 @@ export function Sidebar({ collapsed, onToggle, mobileOpen, onMobileClose }: Side
     ? []
     : menuItems.filter(item => {
         if ((item as { ownerManagerOnly?: boolean }).ownerManagerOnly && !isOwnerOrManager) return false;
-        if (item.module === 'billing' || item.module === 'branches') return isOwnerOrManager;
+        if (item.module === 'branches') return isOwnerOrManager && settings.multiBranchEnabled === true;
+        if (item.module === 'billing') return isOwnerOrManager;
         if (!(hasPermission(item.module, 'read') || item.module === 'dashboard')) return false;
         if (item.group === 'pos' && !settings.posEnabled) return false;
         if (item.group === 'management' && !settings.managementEnabled) {

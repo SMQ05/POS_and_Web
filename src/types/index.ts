@@ -1100,6 +1100,10 @@ export interface AppSettings {
   // sales are marked paid as soon as the receipt prints (seller collected at POS).
   // Defaults to enabled (undefined === true) to preserve existing behaviour.
   cashierCollectionEnabled?: boolean;
+  // When false (default), the pharmacy runs as a single branch: the header
+  // branch switcher, the Branches page, and per-branch user access are all
+  // hidden. Turn on to manage multiple branches.
+  multiBranchEnabled?: boolean;
   // ── Auto-PO (M7) ──
   // When true, the auto-PO worker is allowed to draft purchase orders from
   // low-stock medicines. Owner reviews + confirms before sending.

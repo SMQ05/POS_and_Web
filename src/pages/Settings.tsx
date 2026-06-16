@@ -948,6 +948,31 @@ export function Settings() {
             </Card>
           )}
 
+          {/* Multiple branches toggle (owner only). */}
+          {useAuthStore.getState().currentUser?.role === 'owner' && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Multiple branches</CardTitle>
+                <p className="text-sm text-gray-500 mt-1">
+                  Turn on if you run more than one branch/outlet. Adds the header branch switcher,
+                  the Branches page, and per-staff branch access. Off = single-branch (recommended for one shop).
+                </p>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="font-medium">Enable multiple branches</p>
+                    <p className="text-xs text-gray-500">When off, all branch controls are hidden and everything runs on your single branch.</p>
+                  </div>
+                  <Switch
+                    checked={settings.multiBranchEnabled === true}
+                    onCheckedChange={(checked) => updateSettings({ multiBranchEnabled: checked })}
+                  />
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           {/* M3 — Toggle visit-day schedule for distributors. */}
           {(useAuthStore.getState().currentUser?.role === 'owner' || useAuthStore.getState().currentUser?.role === 'manager') && (
             <Card>
