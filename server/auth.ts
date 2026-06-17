@@ -28,6 +28,11 @@ export interface AuthContext {
   userId: string;
   tenantId: string;
   role: string;
+  // Token version at signing time. Compared against the user's current
+  // tokenVersion on every request so a logout/"sign out everywhere" can revoke
+  // all outstanding tokens. Optional for backward-compat with tokens issued
+  // before this field existed (treated as 0).
+  tv?: number;
 }
 
 declare global {
@@ -59,11 +64,19 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
         isActive: true,
         tenant: { isActive: true },
       },
-      select: { id: true, role: true },
+      select: { id: true, role: true, tokenVersion: true },
     });
 
     if (!user) {
       return res.status(401).json({ error: 'Invalid session' });
+    }
+
+    // Revocation check: a stale token version means the user logged out / was
+    // signed out everywhere after this token was issued. Tokens predating the
+    // tokenVersion feature carry no `tv` (treated as 0, matching the column
+    // default) so they keep working until that user next logs out.
+    if ((decoded.tv ?? 0) !== (user.tokenVersion ?? 0)) {
+      return res.status(401).json({ error: 'Session expired, please sign in again' });
     }
 
     // Trust the CURRENT role from the DB, not the (up to 12h old) token claim —

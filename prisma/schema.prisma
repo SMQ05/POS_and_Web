@@ -161,6 +161,10 @@ model User {
   // owners. The frontend uses this to hide write actions; the API enforces
   // it via requireBranchWrite middleware.
   branchAccess         Json?
+  // Bumped on logout / "sign out everywhere" to revoke all previously-issued
+  // JWTs for this user (the token carries the version it was signed with;
+  // requireAuth rejects any token whose version is stale).
+  tokenVersion         Int       @default(0)
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
   lastLogin            DateTime?

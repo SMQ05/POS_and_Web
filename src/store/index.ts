@@ -144,6 +144,11 @@ export const useAuthStore = create<AuthState>()(
         useSupplierStore.setState({ purchases: [...useSupplierStore.getState().purchases] });
       },
       logout: () => {
+        // Revoke the token server-side (bumps tokenVersion → all this user's
+        // tokens stop working). Fire-and-forget BEFORE we wipe local state, so the
+        // request still carries the current bearer token. Best-effort: even if it
+        // fails (offline), we still clear the client session below.
+        apiRequest('/auth/logout', { method: 'POST' }).catch(() => {});
         set({ currentUser: null, tenant: null, branches: [], activeBranchId: null, token: null, isAuthenticated: false });
       },
       hasPermission: (module: string, action: string) => {

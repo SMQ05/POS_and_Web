@@ -951,7 +951,7 @@ app.post('/api/tenants', requireAuth, requireRole('superadmin'), async (req, res
     });
 
     const owner = tenant.users[0];
-    const token = signToken({ userId: owner.id, tenantId: tenant.id, role: owner.role });
+    const token = signToken({ userId: owner.id, tenantId: tenant.id, role: owner.role, tv: owner.tokenVersion ?? 0 });
     return res.status(201).json({
       tenant: {
         id: tenant.id,
@@ -1044,7 +1044,7 @@ app.post('/api/auth/login', authLimiter, async (req, res) => {
     }
 
     await prisma.user.update({ where: { id: user.id }, data: { lastLogin: new Date() } });
-    const token = signToken({ userId: user.id, tenantId: tenant.id, role: user.role });
+    const token = signToken({ userId: user.id, tenantId: tenant.id, role: user.role, tv: user.tokenVersion ?? 0 });
     await writeLoginAudit(tenant.id, user.id, user.name, 'LOGIN_SUCCESS', `Login from ${data.email}`);
 
     return res.json({
@@ -1064,6 +1064,22 @@ app.post('/api/auth/login', authLimiter, async (req, res) => {
   } catch (error) {
     return sendParseError(res, error);
   }
+});
+
+// Logout / "sign out everywhere": bump tokenVersion so every JWT previously
+// issued to this user is immediately rejected by requireAuth (server-side
+// revocation). Important on shared POS terminals and after a token leak —
+// "Logout" is no longer just a client-side state wipe.
+app.post('/api/auth/logout', requireAuth, async (req, res) => {
+  try {
+    await prisma.user.update({
+      where: { id: req.auth!.userId, tenantId: req.auth!.tenantId },
+      data: { tokenVersion: { increment: 1 } },
+    });
+  } catch (e) {
+    console.error('[logout] tokenVersion bump failed:', e);
+  }
+  return res.json({ ok: true });
 });
 
 app.get('/api/bootstrap', requireAuth, async (req, res) => {
@@ -5894,7 +5910,7 @@ app.post('/api/auth/setup-password', authLimiter, async (req, res) => {
       },
     });
 
-    const token = signToken({ userId: user.id, tenantId: user.tenantId, role: user.role });
+    const token = signToken({ userId: user.id, tenantId: user.tenantId, role: user.role, tv: user.tokenVersion ?? 0 });
     return res.json({
       token,
       tenant: {
